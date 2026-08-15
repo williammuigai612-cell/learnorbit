@@ -9,7 +9,13 @@ from sqlmodel import select
 
 from src.db.courses.courses import Course
 from src.db.organization_config import OrganizationConfig, SeoOrgConfig
-from src.db.organizations import Organization, OrganizationCreate, OrganizationRead, OrganizationUpdate
+from src.db.organizations import (
+    Organization,
+    OrganizationChannelType,
+    OrganizationCreate,
+    OrganizationRead,
+    OrganizationUpdate,
+)
 from src.db.user_organizations import UserOrganization
 from src.services.orgs.orgs import (
     _build_org_read_with_resolved,
@@ -249,6 +255,94 @@ class TestCreateOrg:
             select(OrganizationConfig).where(OrganizationConfig.org_id == result.id)
         )).scalars().first()
         assert stored_config.config["config_version"] == "2.0"
+
+
+class TestChannelType:
+    """LearnOrbit Phase 1A: SCHOOL vs INSTRUCTOR channel type on Organization."""
+
+    @pytest.mark.asyncio
+    async def test_existing_org_defaults_to_school(self, db, org):
+        # `org` fixture (representing a pre-existing/legacy row) never sets
+        # channel_type — it must default to SCHOOL rather than error or be null.
+        assert org.channel_type == OrganizationChannelType.SCHOOL
+
+    @pytest.mark.asyncio
+    @patch("src.services.orgs.orgs.is_multi_org_allowed", return_value=True)
+    @patch("src.routers.users._invalidate_session_cache")
+    async def test_create_org_without_channel_type_defaults_to_school(
+        self, mock_cache, mock_multi_org, mock_request, db, admin_user
+    ):
+        new_org = OrganizationCreate(
+            name="Unspecified Type Org", slug="unspecified-org", email="unspecified@org.com"
+        )
+
+        result = await create_org(mock_request, new_org, admin_user, db)
+
+        assert result.channel_type == OrganizationChannelType.SCHOOL
+
+    @pytest.mark.asyncio
+    @patch("src.services.orgs.orgs.is_multi_org_allowed", return_value=True)
+    @patch("src.routers.users._invalidate_session_cache")
+    async def test_create_school_channel(
+        self, mock_cache, mock_multi_org, mock_request, db, admin_user
+    ):
+        new_org = OrganizationCreate(
+            name="Nairobi Academy",
+            slug="nairobi-academy",
+            email="admin@nairobi-academy.example",
+            channel_type=OrganizationChannelType.SCHOOL,
+        )
+
+        result = await create_org(mock_request, new_org, admin_user, db)
+
+        assert result.channel_type == OrganizationChannelType.SCHOOL
+        row = (await db.execute(
+            select(Organization).where(Organization.slug == "nairobi-academy")
+        )).scalars().first()
+        assert row.channel_type == OrganizationChannelType.SCHOOL
+
+    @pytest.mark.asyncio
+    @patch("src.services.orgs.orgs.is_multi_org_allowed", return_value=True)
+    @patch("src.routers.users._invalidate_session_cache")
+    async def test_create_instructor_channel_and_ownership(
+        self, mock_cache, mock_multi_org, mock_request, db, admin_user
+    ):
+        new_org = OrganizationCreate(
+            name="Jane's Chemistry Channel",
+            slug="jane-chemistry",
+            email="jane@example.com",
+            channel_type=OrganizationChannelType.INSTRUCTOR,
+        )
+
+        result = await create_org(mock_request, new_org, admin_user, db)
+
+        assert result.channel_type == OrganizationChannelType.INSTRUCTOR
+
+        row = (await db.execute(
+            select(Organization).where(Organization.slug == "jane-chemistry")
+        )).scalars().first()
+        assert row.channel_type == OrganizationChannelType.INSTRUCTOR
+
+        # Ownership: the creator must still be linked via UserOrganization as
+        # admin (role_id=1), exactly like a SCHOOL org — INSTRUCTOR channels
+        # reuse the same membership/ownership system, not a separate one.
+        membership = (await db.execute(
+            select(UserOrganization).where(
+                UserOrganization.org_id == row.id,
+                UserOrganization.user_id == admin_user.id,
+            )
+        )).scalars().first()
+        assert membership is not None
+        assert membership.role_id == 1
+
+    @pytest.mark.asyncio
+    async def test_get_org_by_slug_returns_channel_type(
+        self, mock_request, db, org, admin_user
+    ):
+        # The existing public /orgs/[slug] read path must keep working and
+        # now also surface channel_type.
+        result = await get_organization_by_slug(mock_request, "test-org", db, admin_user)
+        assert result.channel_type == OrganizationChannelType.SCHOOL
 
 
 class TestUpdateOrg:

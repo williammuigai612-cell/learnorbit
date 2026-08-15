@@ -18,7 +18,7 @@ from src.db.custom_domains import (
     CustomDomainVerificationInfo,
     CustomDomainResolveResponse,
 )
-from src.db.organizations import Organization
+from src.db.organizations import Organization, OrganizationChannelType
 from src.db.users import PublicUser, AnonymousUser, APITokenUser
 from src.security.auth import resolve_acting_user_id
 from src.security.rbac.rbac import authorization_verify_if_user_is_anon
@@ -256,6 +256,16 @@ async def add_custom_domain(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found",
+        )
+
+    # VERIFICATION 2b: Custom domains are a multi-tenant/white-label site
+    # feature (own DNS, own TLS, own branding host). LearnOrbit INSTRUCTOR
+    # channels are individual creator profiles, not tenant sites, so this
+    # feature doesn't apply to them. SCHOOL channels are unaffected.
+    if organization.channel_type == OrganizationChannelType.INSTRUCTOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Custom domains are not available for instructor channels",
         )
 
     # VERIFICATION 3+4: Membership + admin permission (superadmins bypass)

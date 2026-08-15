@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from sqlmodel import select
 
 from src.db.custom_domains import CustomDomain
+from src.db.organizations import Organization, OrganizationChannelType
 from src.db.users import PublicUser
 from src.services.orgs import custom_domains as custom_domains_service
 from src.services.orgs.custom_domains import (
@@ -185,6 +186,42 @@ class TestAddCustomDomain:
         assert result.verification_token == "token-123"
         assert row is not None
         assert row.domain_uuid.startswith("domain_")
+
+    @pytest.mark.asyncio
+    async def test_add_custom_domain_blocked_for_instructor_channel(
+        self, mock_request, db, admin_user
+    ):
+        # LearnOrbit Phase 1A gating: custom domains are a multi-tenant/site
+        # feature and must not be available to individual INSTRUCTOR channels.
+        instructor_org = Organization(
+            id=42,
+            name="Jane's Chemistry Channel",
+            slug="jane-chemistry",
+            email="jane@example.com",
+            org_uuid="org_jane",
+            channel_type=OrganizationChannelType.INSTRUCTOR,
+            creation_date=str(datetime.now()),
+            update_date=str(datetime.now()),
+        )
+        db.add(instructor_org)
+        await db.commit()
+        await db.refresh(instructor_org)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await add_custom_domain(
+                mock_request,
+                db,
+                custom_domains_service.CustomDomainCreate(domain="learn.jane-chemistry.com"),
+                instructor_org.id,
+                admin_user,
+            )
+
+        assert exc_info.value.status_code == 403
+        assert "instructor channels" in exc_info.value.detail
+        row = (await db.execute(
+            select(CustomDomain).where(CustomDomain.org_id == instructor_org.id)
+        )).scalars().first()
+        assert row is None
 
     @pytest.mark.asyncio
     async def test_add_custom_domain_rejects_anonymous_and_non_admin_users(

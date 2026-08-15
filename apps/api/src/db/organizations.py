@@ -1,6 +1,7 @@
+from enum import Enum
 from typing import List, Optional, TYPE_CHECKING
 from pydantic import BaseModel
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, String
 from sqlmodel import Field, SQLModel
 from src.db.roles import RoleRead
 from src.db.usergroups import UserGroupRead
@@ -9,6 +10,18 @@ from src.db.organization_config import OrganizationConfig
 
 if TYPE_CHECKING:
     from src.db.users import UserRead
+
+
+class OrganizationChannelType(str, Enum):
+    """LearnOrbit channel type for an Organization.
+
+    Stored as a plain string column (not a native Postgres enum) so new
+    values can be added later without an ALTER TYPE migration — same
+    convention as other growable string-backed enums in this codebase
+    (see migrations/versions/k1f2a3b4c5d6_add_community_page_type.py).
+    """
+    SCHOOL = "SCHOOL"
+    INSTRUCTOR = "INSTRUCTOR"
 
 
 class OrganizationBase(SQLModel):
@@ -25,6 +38,7 @@ class OrganizationBase(SQLModel):
     label: Optional[str] = None
     slug: str
     email: str
+    channel_type: OrganizationChannelType = Field(default=OrganizationChannelType.SCHOOL)
 
 
 class Organization(OrganizationBase, table=True):
@@ -33,6 +47,12 @@ class Organization(OrganizationBase, table=True):
     org_uuid: str = Field(default="", unique=True)
     slug: str = Field(unique=True, index=True)  # Override to add unique constraint
     explore: Optional[bool] = Field(default=False, index=True)  # Override to add index
+    # Existing rows default to SCHOOL: every Organization created before this
+    # field existed was, by definition, a school/institution tenant.
+    channel_type: OrganizationChannelType = Field(
+        default=OrganizationChannelType.SCHOOL,
+        sa_column=Column(String(), nullable=False, server_default="SCHOOL", index=True),
+    )
     creation_date: str = ""
     update_date: str = ""
 
