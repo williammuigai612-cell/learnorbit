@@ -8,6 +8,7 @@ import { JsonLd } from '@components/SEO/JsonLd'
 import { getUriWithOrg } from '@services/config/config'
 import { getOrgLogoMediaDirectory } from '@services/media/media'
 import GeneralWrapperStyled from '@components/Objects/StyledElements/Wrappers/GeneralWrapper'
+import ChannelHeader from '@components/Objects/Channel/ChannelHeader'
 
 export default function HomeClient({ orgslug }: { orgslug: string }) {
   const org = useOrg() as any
@@ -53,6 +54,9 @@ export default function HomeClient({ orgslug }: { orgslug: string }) {
   return (
     <div className="w-full">
       {orgJsonLd && <JsonLd data={orgJsonLd} />}
+      <GeneralWrapperStyled>
+        <ChannelHeader org={org} />
+      </GeneralWrapperStyled>
       {hasCustomLanding ? (
         <LandingCustom landing={landingConfig} orgslug={orgslug} />
       ) : (

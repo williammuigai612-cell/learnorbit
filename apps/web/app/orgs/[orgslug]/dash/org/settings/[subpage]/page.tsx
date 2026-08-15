@@ -17,6 +17,7 @@ import OrgEditDangerZone from '@components/Dashboard/Pages/Org/OrgEditDangerZone
 import { useTranslation } from 'react-i18next'
 import { PlanLevel } from '@services/plans/plans'
 import { DashTabBar, DashTabItem } from '@components/Dashboard/Shared/DashTabBar/DashTabBar'
+import { useOrg } from '@components/Contexts/OrgContext'
 
 // Security now lives with the people it governs, under Users, split across a
 // two-factor tab and a sign-in-methods tab. The old single URL keeps working.
@@ -65,7 +66,13 @@ function OrgPage(props: { params: Promise<OrgParams> }) {
   const params = use(props.params);
   const [H1Label, setH1Label] = React.useState('')
   const [H2Label, setH2Label] = React.useState('')
-  const SETTING_TABS = getSettingTabs(t)
+  const org = useOrg() as any
+  // INSTRUCTOR channels are an individual creator's space, not a multi-tenant
+  // site — custom scripts (Other tab) don't apply, so hide that entry point.
+  const isInstructorChannel = org?.channel_type === 'INSTRUCTOR'
+  const SETTING_TABS = getSettingTabs(t).filter(
+    (tab) => !(isInstructorChannel && tab.id === 'other')
+  )
 
   // Redirect legacy developer subpages to the new top-level Developers dashboard.
   const movedTo = MOVED_TO_DEVELOPERS[params.subpage]
@@ -158,7 +165,7 @@ function OrgPage(props: { params: Promise<OrgParams> }) {
         {params.subpage == 'landing' ? <OrgEditLanding /> : ''}
         {params.subpage == 'ai' ? <OrgEditAI /> : ''}
         {params.subpage == 'usage' ? <OrgEditUsage /> : ''}
-        {params.subpage == 'other' ? <OrgEditOther /> : ''}
+        {params.subpage == 'other' && !isInstructorChannel ? <OrgEditOther /> : ''}
         {params.subpage == 'danger' ? <OrgEditDangerZone /> : ''}
       </motion.div>
     </div>

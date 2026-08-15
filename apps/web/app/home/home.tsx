@@ -66,7 +66,7 @@ function HomeClient() {
   // post-signup onboarding hop.
   useEffect(() => {
     if (isAuthenticated && Array.isArray(orgs) && orgs.length === 0) {
-      router.replace('/new')
+      router.replace('/new-channel')
     }
   }, [isAuthenticated, orgs, router])
 
@@ -220,11 +220,11 @@ function HomeClient() {
               {/* Create organization — prominent entry into the hub */}
               {isAuthenticated && orgs && (
                 <Link
-                  href="/new"
+                  href="/new-channel"
                   className="w-full flex items-center justify-center gap-2 px-5 py-3.5 bg-gray-900 text-white rounded-2xl font-semibold text-sm nice-shadow hover:bg-gray-800 transition-colors"
                 >
                   <Plus size={16} />
-                  {t('common.create_organization', { defaultValue: 'Create organization' })}
+                  {t('common.create_channel', { defaultValue: 'Create channel' })}
                 </Link>
               )}
             </div>

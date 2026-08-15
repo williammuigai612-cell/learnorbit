@@ -60,6 +60,41 @@ Findings:
 - Not yet built (explicitly out of scope for Phase 1A): follows/subscriptions,
   videos/Shorts, feeds.
 
+### Channels (Phase 1B) — creation UI, profile header, settings gating
+Investigated/touched: `app/(hub)/new/page.tsx` (existing SaaS onboarding
+wizard — read only, not modified), `app/(hub)/layout.tsx`, `proxy.ts`,
+`services/config/config.ts` (`getUriWithOrg`), `dash/org/settings/[subpage]/page.tsx`.
+
+- The existing `/new` flow is LearnHouse's full SaaS onboarding wizard
+  (personal/org split, team size, pricing plans, Stripe checkout) — out of
+  scope for LearnOrbit V1 (no monetization). Added a separate, minimal
+  `app/(hub)/new-channel/page.tsx` instead of modifying `/new` in place:
+  name/description/slug + a School/Institution vs Teacher/Creator picker,
+  calling the same unmodified `createNewOrganization` service with
+  `channel_type` in the body. `home.tsx`'s two entry points now point here;
+  `/new` is untouched.
+- `ChannelHeader` (`components/Objects/Channel/ChannelHeader.tsx`) renders at
+  the top of `/orgs/[slug]`: name, channel-type badge, description/about,
+  logo. Creator name is shown only to authenticated org members (reuses the
+  existing `/orgs/{id}/users` endpoint, filtered client-side to `role.id ===
+  1`) — there is no public members endpoint, and adding one was out of scope.
+- **Important local-dev-only limitation, discovered while testing this**:
+  reaching more than one organization by slug requires
+  `hosting_config.tenancy: multi` (subdomain routing, e.g.
+  `slug.{domain}`). `config.py` hard-rejects `LEARNHOUSE_TENANCY=multi` when
+  `LEARNHOUSE_DOMAIN` contains "localhost" (deliberate — subdomains of
+  `localhost` aren't routable in browsers), so this cannot be worked around
+  for local dev short of a real domain. With `tenancy: single` (the local
+  default), every org-scoped URL — including `getUriWithOrg()` and the
+  `(hub)` route group itself — collapses onto the single seeded default org;
+  `LEARNHOUSE_SAAS=true` (now set in `apps/api/.env`) only lifts the
+  org-creation-count cap, it does not change tenancy. Channel creation and
+  the profile/settings UI were therefore verified via direct API calls and
+  by temporarily toggling the *existing* default org's `channel_type` in the
+  dev DB, not by creating-and-visiting a second channel end-to-end. This
+  will need a real (or staging) domain to fully exercise multi-channel
+  navigation.
+
 ## Areas To Map
 - Frontend application
 - API/backend
