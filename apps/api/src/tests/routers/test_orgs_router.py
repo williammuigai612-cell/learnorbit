@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.core.events.database import get_db_session
 from src.db.organizations import OrganizationRead
+from src.db.organization_follows import OrganizationFollowStatus
 from src.routers.orgs.orgs import router as orgs_router
 from src.security.auth import get_authenticated_user, get_current_user
 from src.security.features_utils.dependencies import require_org_admin
@@ -539,3 +540,76 @@ class TestUploadAndListingEndpoints:
 
         assert response.status_code == 200
         assert response.json()["active_users"] == 214
+
+
+class TestOrgFollowEndpoints:
+    async def test_get_follow_status(self, client):
+        with patch(
+            "src.routers.orgs.orgs.get_follow_status",
+            new_callable=AsyncMock,
+            return_value=OrganizationFollowStatus(is_following=True, follower_count=5),
+        ):
+            response = await client.get("/api/v1/orgs/1/follow")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_following": True, "follower_count": 5}
+
+    async def test_follow_org(self, client):
+        with patch(
+            "src.routers.orgs.orgs.follow_organization",
+            new_callable=AsyncMock,
+            return_value=OrganizationFollowStatus(is_following=True, follower_count=1),
+        ) as follow_mock:
+            response = await client.post("/api/v1/orgs/1/follow")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_following": True, "follower_count": 1}
+        follow_mock.assert_awaited_once()
+
+    async def test_unfollow_org(self, client):
+        with patch(
+            "src.routers.orgs.orgs.unfollow_organization",
+            new_callable=AsyncMock,
+            return_value=OrganizationFollowStatus(is_following=False, follower_count=0),
+        ) as unfollow_mock:
+            response = await client.delete("/api/v1/orgs/1/follow")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_following": False, "follower_count": 0}
+        unfollow_mock.assert_awaited_once()
+
+    async def test_follow_org_requires_authentication(self, app, anonymous_user):
+        # Not mocking follow_organization: the real service raises 401 for an
+        # AnonymousUser before touching the database, so this exercises the
+        # actual auth guard rather than a mocked stand-in.
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.post("/api/v1/orgs/1/follow")
+
+        assert response.status_code == 401
+
+    async def test_unfollow_org_requires_authentication(self, app, anonymous_user):
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.delete("/api/v1/orgs/1/follow")
+
+        assert response.status_code == 401
+
+    async def test_get_follow_status_allows_anonymous(self, app, anonymous_user):
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        with patch(
+            "src.routers.orgs.orgs.get_follow_status",
+            new_callable=AsyncMock,
+            return_value=OrganizationFollowStatus(is_following=False, follower_count=3),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as anon_client:
+                response = await anon_client.get("/api/v1/orgs/1/follow")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_following": False, "follower_count": 3}

@@ -95,6 +95,46 @@ wizard — read only, not modified), `app/(hub)/layout.tsx`, `proxy.ts`,
   will need a real (or staging) domain to fully exercise multi-channel
   navigation.
 
+### Channels (Phase 1C) — following, a dedicated table rather than reusing UserOrganization
+Investigated: `apps/api/src/db/user_organizations.py`,
+`apps/api/src/db/playground_reactions.py` and its service/router
+(`services/playgrounds/playground_reactions.py`,
+`routers/playgrounds/playgrounds.py`), `apps/api/src/security/auth.py`
+(`resolve_acting_user_id`, `get_current_user`).
+
+Findings:
+- `UserOrganization` (user↔org membership) always carries a `role_id` and
+  drives permissions inside the org — it means "has a role here," not
+  "subscribed to this channel's public updates." Reusing it for following
+  would have forced a synthetic no-permissions role onto every follower and
+  conflated two different relationships.
+- `PlaygroundReaction` (a per-user, per-target row with a unique constraint
+  and an `IntegrityError` rollback guard for a racing duplicate) is the
+  closest existing analog to a lightweight, roleless, many-to-many
+  relationship in this codebase, so its shape was reused rather than
+  reinvented.
+- Decision: a new `organizationfollow` table
+  (`apps/api/src/db/organization_follows.py`), `UniqueConstraint(org_id,
+  user_id)`, `ondelete="CASCADE"` FKs to both `organization.id` and
+  `user.id`. Migration: `7c8d9e0f1a2b_add_organization_follows_table.py`
+  (`down_revision` = `652b0b59778d`, the Phase 1A migration — still head at
+  the time Phase 1C started).
+- Endpoints live on the existing `orgs` router rather than a new one:
+  `GET/POST/DELETE /orgs/{org_id}/follow`. `POST`/`DELETE` require
+  authentication and are idempotent (no error on a repeat
+  follow/unfollow); `GET` allows anonymous viewers so the public follower
+  count can render without a session. Neither mutating endpoint accepts a
+  `user_id` in the body/path — the acting user always comes from
+  `resolve_acting_user_id(current_user)` off the authenticated session, so
+  there is no way for a caller to modify another user's follow relationship
+  (the same class of guard as the existing `/orgs/join` `user_id` check).
+- Frontend: `ChannelHeader.tsx` renders the Follow/Following control and
+  follower count via new `useOrgFollowStatus`/`useFollowOrg`/`useUnfollowOrg`
+  hooks (`hooks/queries/useOrg.ts`), matching the existing `useOrgUsers`
+  React Query pattern in `useOrgAdmin.ts`. Not exercised live against a
+  second channel locally — same `tenancy: single` local-dev limitation
+  documented under Phase 1B.
+
 ## Areas To Map
 - Frontend application
 - API/backend

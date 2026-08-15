@@ -20,6 +20,24 @@ export async function createNewOrganization(body: any, access_token: string) {
   return res
 }
 
+export async function followOrganization(org_id: any, access_token: string) {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/follow`,
+    RequestBodyWithAuthHeader('POST', null, null, access_token)
+  )
+  const res = await errorHandling(result)
+  return res
+}
+
+export async function unfollowOrganization(org_id: any, access_token: string) {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/follow`,
+    RequestBodyWithAuthHeader('DELETE', null, null, access_token)
+  )
+  const res = await errorHandling(result)
+  return res
+}
+
 export async function deleteOrganizationFromBackend(
   org_id: any,
   access_token: string

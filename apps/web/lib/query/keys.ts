@@ -9,6 +9,7 @@ export const queryKeys = {
     auditLogs: (orgId: number) => ['org', orgId, 'auditLogs'] as const,
     automations: (orgId: number) => ['org', orgId, 'automations'] as const,
     apiTokens: (orgId: number) => ['org', orgId, 'apiTokens'] as const,
+    follow: (orgId: number) => ['org', orgId, 'follow'] as const,
   },
   courses: {
     list: (orgSlug: string) => ['courses', orgSlug] as const,

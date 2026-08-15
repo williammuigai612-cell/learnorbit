@@ -4,6 +4,8 @@ import React from 'react'
 import { School, GraduationCap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useOrgUsers } from '@/hooks/queries/useOrgAdmin'
+import { useFollowOrg, useOrgFollowStatus, useUnfollowOrg } from '@/hooks/queries/useOrg'
+import { useLHSession } from '@components/Contexts/LHSessionContext'
 import { getOrgLogoMediaDirectory } from '@services/media/media'
 
 interface ChannelHeaderProps {
@@ -18,6 +20,24 @@ interface ChannelHeaderProps {
 export default function ChannelHeader({ org }: ChannelHeaderProps) {
   const { t } = useTranslation()
   const { data: usersPage } = useOrgUsers(org?.id)
+  const session = useLHSession() as any
+  const isAuthenticated = session?.status === 'authenticated'
+
+  const { data: followStatus } = useOrgFollowStatus(org?.id)
+  const followOrg = useFollowOrg(org?.id)
+  const unfollowOrg = useUnfollowOrg(org?.id)
+  const isFollowing = followStatus?.is_following ?? false
+  const followerCount = followStatus?.follower_count ?? 0
+  const followPending = followOrg.isPending || unfollowOrg.isPending
+
+  const handleFollowToggle = () => {
+    if (followPending) return
+    if (isFollowing) {
+      unfollowOrg.mutate()
+    } else {
+      followOrg.mutate()
+    }
+  }
 
   const owner = (usersPage?.items || []).find((u: any) => u.role?.id === 1)
   const ownerName = owner
@@ -55,6 +75,30 @@ export default function ChannelHeader({ org }: ChannelHeaderProps) {
             <TypeIcon size={12} />
             {typeLabel}
           </span>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-gray-500">
+            {t('channel.followerCount', {
+              count: followerCount,
+              defaultValue: '{{count}} followers',
+            })}
+          </span>
+          {isAuthenticated && (
+            <button
+              type="button"
+              onClick={handleFollowToggle}
+              disabled={followPending}
+              className={
+                isFollowing
+                  ? 'px-3 py-1 rounded-full text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors'
+                  : 'px-3 py-1 rounded-full text-xs font-semibold bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 transition-colors'
+              }
+            >
+              {isFollowing
+                ? t('channel.following', { defaultValue: 'Following' })
+                : t('channel.follow', { defaultValue: 'Follow' })}
+            </button>
+          )}
         </div>
         {about && <p className="text-sm text-gray-500 max-w-2xl">{about}</p>}
         {ownerName && (

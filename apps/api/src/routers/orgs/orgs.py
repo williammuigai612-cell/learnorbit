@@ -27,9 +27,15 @@ from src.db.organizations import (
     OrganizationRead,
     OrganizationUpdate,
 )
+from src.db.organization_follows import OrganizationFollowStatus
 from src.core.events.database import get_db_session
 from src.security.auth import get_current_user, get_authenticated_user
 from src.security.features_utils.dependencies import require_org_admin
+from src.services.orgs.follows import (
+    follow_organization,
+    get_follow_status,
+    unfollow_organization,
+)
 from src.services.orgs.orgs import (
     create_org,
     create_org_with_config,
@@ -1612,6 +1618,76 @@ async def api_get_org_active_users(
     )
     from src.security.features_utils.active_users import get_active_user_summary
     return await get_active_user_summary(org_id, db_session, year=year, month=month)
+
+
+# Channel following (LearnOrbit Phase 1C)
+@router.get(
+    "/{org_id}/follow",
+    response_model=OrganizationFollowStatus,
+    summary="Get channel follow status",
+    description=(
+        "Return whether the current user follows this channel and the total "
+        "follower count. Supports anonymous viewers (is_following is always "
+        "false for them)."
+    ),
+    responses={
+        200: {"description": "Follow status and follower count.", "model": OrganizationFollowStatus},
+        404: {"description": "Organization not found"},
+    },
+)
+async def api_get_org_follow_status(
+    request: Request,
+    org_id: int,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> OrganizationFollowStatus:
+    return await get_follow_status(request, org_id, current_user, db_session)
+
+
+@router.post(
+    "/{org_id}/follow",
+    response_model=OrganizationFollowStatus,
+    summary="Follow a channel",
+    description=(
+        "Follow the organization/channel as the authenticated user. Idempotent "
+        "— following an already-followed channel is a no-op."
+    ),
+    responses={
+        200: {"description": "Now following the channel.", "model": OrganizationFollowStatus},
+        401: {"description": "Not authenticated"},
+        404: {"description": "Organization not found"},
+    },
+)
+async def api_follow_org(
+    request: Request,
+    org_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> OrganizationFollowStatus:
+    return await follow_organization(request, org_id, current_user, db_session)
+
+
+@router.delete(
+    "/{org_id}/follow",
+    response_model=OrganizationFollowStatus,
+    summary="Unfollow a channel",
+    description=(
+        "Unfollow the organization/channel as the authenticated user. "
+        "Idempotent — unfollowing a channel you don't follow is a no-op."
+    ),
+    responses={
+        200: {"description": "No longer following the channel.", "model": OrganizationFollowStatus},
+        401: {"description": "Not authenticated"},
+        404: {"description": "Organization not found"},
+    },
+)
+async def api_unfollow_org(
+    request: Request,
+    org_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> OrganizationFollowStatus:
+    return await unfollow_organization(request, org_id, current_user, db_session)
 
 
 # Include the feature config sub-router (admin-only endpoints)
