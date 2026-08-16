@@ -36,6 +36,18 @@ from src.services.orgs.follows import (
     get_follow_status,
     unfollow_organization,
 )
+from src.services.orgs.channel_videos import (
+    ChannelVideoCreate,
+    ChannelVideoPublish,
+    ChannelVideoRead,
+    ChannelVideoUpdate,
+    create_channel_video,
+    delete_channel_video,
+    get_channel_video,
+    list_channel_videos,
+    set_channel_video_published,
+    update_channel_video,
+)
 from src.services.orgs.orgs import (
     create_org,
     create_org_with_config,
@@ -1688,6 +1700,176 @@ async def api_unfollow_org(
     db_session: AsyncSession = Depends(get_db_session),
 ) -> OrganizationFollowStatus:
     return await unfollow_organization(request, org_id, current_user, db_session)
+
+
+# Channel videos (LearnOrbit Phase 2C) — a thin discovery/metadata layer over
+# an existing video Activity. See docs/ARCHITECTURE.md § "Videos (Phase 2A)".
+@router.post(
+    "/{org_id}/videos",
+    response_model=ChannelVideoRead,
+    summary="Post an existing video Activity to this channel",
+    description=(
+        "Create a ChannelVideo discovery post wrapping an already-created "
+        "video Activity (created via the existing course video-activity "
+        "endpoints). Owner/admin only. Starts unpublished."
+    ),
+    responses={
+        200: {"description": "Channel video created.", "model": ChannelVideoRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or video activity not found"},
+        409: {"description": "Activity is not a video, or already posted to a channel"},
+    },
+)
+async def api_create_channel_video(
+    request: Request,
+    org_id: int,
+    data: ChannelVideoCreate,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoRead:
+    return await create_channel_video(request, org_id, current_user, db_session, data)
+
+
+@router.get(
+    "/{org_id}/videos",
+    response_model=List[ChannelVideoRead],
+    summary="List a channel's videos",
+    description=(
+        "Public/anonymous viewers see published, publicly-visible videos "
+        "only. This channel's owner/admins see everything, including drafts "
+        "and unlisted posts. Supports filtering by educational metadata and "
+        "sorts newest-first."
+    ),
+    responses={
+        200: {"description": "Channel videos.", "model": List[ChannelVideoRead]},
+        404: {"description": "Organization not found"},
+    },
+)
+async def api_list_channel_videos(
+    request: Request,
+    org_id: int,
+    subject: Optional[str] = None,
+    topic: Optional[str] = None,
+    level: Optional[str] = None,
+    institution_context: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> List[ChannelVideoRead]:
+    return await list_channel_videos(
+        request, org_id, current_user, db_session,
+        subject=subject, topic=topic, level=level,
+        institution_context=institution_context, resource_type=resource_type,
+    )
+
+
+@router.get(
+    "/{org_id}/videos/{channelvideo_id}",
+    response_model=ChannelVideoRead,
+    summary="Get a channel video",
+    description=(
+        "Public/anonymous access for published, publicly-visible videos. "
+        "Unpublished or unlisted videos are only visible to this channel's "
+        "owner/admins."
+    ),
+    responses={
+        200: {"description": "Channel video.", "model": ChannelVideoRead},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_get_channel_video(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoRead:
+    return await get_channel_video(request, org_id, channelvideo_id, current_user, db_session)
+
+
+@router.put(
+    "/{org_id}/videos/{channelvideo_id}",
+    response_model=ChannelVideoRead,
+    summary="Update a channel video's metadata",
+    description=(
+        "Partial update of a ChannelVideo's editable metadata (title, "
+        "description, subject, topic, level, institution_context, "
+        "resource_type). Fields omitted from the request body are left "
+        "unchanged. Owner/admin only. Does not touch the underlying video "
+        "Activity's upload/storage/HLS/captions."
+    ),
+    responses={
+        200: {"description": "Updated channel video.", "model": ChannelVideoRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or channel video not found"},
+        422: {"description": "Title cannot be empty"},
+    },
+)
+async def api_update_channel_video(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    data: ChannelVideoUpdate,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoRead:
+    return await update_channel_video(
+        request, org_id, channelvideo_id, current_user, db_session, data
+    )
+
+
+@router.put(
+    "/{org_id}/videos/{channelvideo_id}/publish",
+    response_model=ChannelVideoRead,
+    summary="Publish or unpublish a channel video",
+    description="Owner/admin only.",
+    responses={
+        200: {"description": "Updated channel video.", "model": ChannelVideoRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_set_channel_video_published(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    data: ChannelVideoPublish,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoRead:
+    return await set_channel_video_published(
+        request, org_id, channelvideo_id, current_user, db_session, data
+    )
+
+
+@router.delete(
+    "/{org_id}/videos/{channelvideo_id}",
+    summary="Remove a video from this channel",
+    description=(
+        "Deletes the ChannelVideo discovery post only. The underlying video "
+        "Activity (upload/storage/HLS/captions) is left untouched — it may "
+        "still be used inside its course. Owner/admin only."
+    ),
+    responses={
+        200: {"description": "Channel video removed."},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_delete_channel_video(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    await delete_channel_video(request, org_id, channelvideo_id, current_user, db_session)
+    return {"detail": "Channel video removed"}
 
 
 # Include the feature config sub-router (admin-only endpoints)
