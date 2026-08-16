@@ -1,14 +1,13 @@
 'use client'
 import React, { useEffect, useState } from 'react'
 import CopilotBubble from '@components/Copilot/CopilotBubble'
-import Image from 'next/image'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query/keys'
 import { getUriWithOrg } from '@services/config/config'
 import { fetchRAGChatSessions, RAGChatSession } from '@services/ai/ai'
 import { HeaderProfileBox } from '@components/Security/HeaderProfileBox'
-import MenuLinks from './OrgMenuLinks'
+import { OrgBottomTabBar } from '@components/Objects/Menus/OrgBottomTabBar'
 import { getOrgLogoMediaDirectory } from '@services/media/media'
 import { useLHSession } from '@components/Contexts/LHSessionContext'
 import { useOrg } from '@components/Contexts/OrgContext'
@@ -144,7 +143,7 @@ export const OrgMenu = (props: any) => {
       <div className="backdrop-blur-lg h-[60px] blur-3xl" style={{ zIndex: 'var(--z-behind)', marginTop: topOffset }}></div>
       <nav
         aria-label="Top navigation"
-        className={`backdrop-blur-lg fixed start-0 end-0 h-[60px] ${!primaryColor ? 'bg-white/90 nice-shadow' : ''}`}
+        className={`backdrop-blur-lg fixed start-0 end-0 h-[60px] ${!primaryColor ? 'bg-background/90 border-b border-border' : ''}`}
         style={{
           zIndex: 'var(--z-nav)',
           backgroundColor: primaryColor || undefined,
@@ -159,18 +158,15 @@ export const OrgMenu = (props: any) => {
                   {org?.logo_image ? (
                     <img
                       src={`${getOrgLogoMediaDirectory(org.org_uuid, org?.logo_image)}`}
-                      alt="Learnhouse"
+                      alt={org?.name || 'Organization logo'}
                       style={{ width: 'auto', height: '100%' }}
                       className="rounded-md"
                     />
                   ) : (
-                    <LearnHouseLogo logoFilter={colors.logoFilter} />
+                    <LearnOrbitWordmark />
                   )}
                 </div>
               </Link>
-            </div>
-            <div className="hidden md:flex">
-              <MenuLinks orgslug={orgslug} primaryColor={primaryColor} />
             </div>
           </div>
 
@@ -380,7 +376,7 @@ export const OrgMenu = (props: any) => {
         </div>
       </nav>
       <div
-        className={`fixed inset-x-0 bg-white/80 backdrop-blur-lg md:hidden shadow-lg transition-all duration-300 ease-in-out ${
+        className={`fixed inset-x-0 bg-background/95 backdrop-blur-lg md:hidden shadow-lg transition-all duration-300 ease-in-out ${
           isMenuOpen ? 'opacity-100' : '-top-full opacity-0'
         }`}
         style={{
@@ -388,19 +384,22 @@ export const OrgMenu = (props: any) => {
           top: isMenuOpen ? topOffset + 60 : undefined
         }}
       >
+        {/* Primary destinations live in the bottom tab bar below (§14: "not a
+            hamburger drawer duplicating the tab bar") — this panel only
+            surfaces what the tab bar can't: search and account. */}
         <div className="flex flex-col px-4 py-3 space-y-4 justify-center items-center">
           {/* Mobile Search */}
           <div className="w-full px-2">
             <SearchBar orgslug={orgslug} isMobile={true} />
           </div>
-          <div className='py-4'>
-            <MenuLinks orgslug={orgslug} />
-          </div>
-          <div className="border-t border-gray-200">
+          <div className="border-t border-border">
             <HeaderProfileBox />
           </div>
         </div>
       </div>
+
+      {/* Mobile/tablet primary navigation (< lg) — desktop uses OrgSidebar */}
+      <OrgBottomTabBar orgslug={orgslug} onMoreClick={toggleMenu} />
 
       {/* Feedback Modal */}
       <FeedbackModal
@@ -557,14 +556,6 @@ const CopilotMenuButton = ({
   )
 }
 
-const LearnHouseLogo = ({ logoFilter }: { logoFilter: string }) => {
-  return (
-    <Image
-      src="/lrn-text.svg"
-      alt="LearnHouse logo"
-      width={133}
-      height={40}
-      style={{ height: 'auto', filter: logoFilter }}
-    />
-  )
-}
+const LearnOrbitWordmark = () => (
+  <span className="text-lg font-bold tracking-tight text-primary">LearnOrbit</span>
+)

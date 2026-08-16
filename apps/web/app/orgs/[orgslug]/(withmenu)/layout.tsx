@@ -4,6 +4,7 @@ import '@styles/globals.css'
 import Watermark from '@components/Objects/Watermark'
 import { SessionGate } from '@components/Contexts/LHSessionContext'
 import { OrgMenu } from '@components/Objects/Menus/OrgMenu'
+import { OrgSidebar } from '@components/Objects/Menus/OrgSidebar'
 import { useOrg } from '@components/Contexts/OrgContext'
 import { OrgJoinBanner, OrgJoinBannerProvider } from '@components/Objects/Banners/OrgJoinBanner'
 import { OrgMFAPolicyGate } from '@components/Objects/Banners/OrgMFAPolicyGate'
@@ -122,10 +123,19 @@ function LayoutContent({ children, orgslug }: { children: ReactNode; orgslug: st
       {!chromeless && <OrgMenu orgslug={orgslug} />}
       {/* Org-wide 2FA policy: renders nothing unless this user is non-compliant. */}
       {!chromeless && <OrgMFAPolicyGate />}
-      <div className="flex-1 relative" style={{ zIndex: 'var(--z-content)' }}>
+      {/* Desktop (>= lg) primary nav; mobile/tablet use OrgMenu's bottom tab bar */}
+      {!chromeless && <OrgSidebar orgslug={orgslug} />}
+      <div
+        className={`flex-1 relative ${!chromeless ? 'lg:ps-60 pb-16 lg:pb-0' : ''}`}
+        style={{ zIndex: 'var(--z-content)' }}
+      >
         {children}
       </div>
-      {!isFullBleedPage && !chromeless && <OrgFooter />}
+      {!isFullBleedPage && !chromeless && (
+        <div className="lg:ps-60">
+          <OrgFooter />
+        </div>
+      )}
       {!isFullBleedPage && !chromeless && <Watermark />}
     </div>
   )

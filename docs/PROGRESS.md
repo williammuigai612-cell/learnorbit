@@ -91,6 +91,33 @@ Phase 1C (Channel Following) complete. Next: videos/Shorts (Phase 2/3).
     was code-reviewed against the existing `ChannelHeader` wiring rather
     than clicked in a running second channel.
 
+## UI/UX Track
+Separate from the product-phase track above; sequenced per `docs/UI_UX_IMPLEMENTATION_PLAN.md`.
+- **UI-0 — Design Foundations**: complete (commit `8478a3be`). LearnOrbit's
+  blue/teal token system wired into `apps/web/styles/globals.css`; see
+  `docs/DESIGN_SYSTEM.md`.
+- **UI-1 — Global Application Shell**: complete. Rebranded the header
+  (LearnOrbit wordmark replaces the LearnHouse logo/alt text), retokenized
+  the shell's default (non-custom-branded) colors in
+  `services/utils/ts/colorUtils.ts`, and added a persistent desktop sidebar
+  (`components/Objects/Menus/OrgSidebar.tsx`, ≥`lg`) plus a mobile/tablet
+  bottom tab bar (`components/Objects/Menus/OrgBottomTabBar.tsx`, <`lg`),
+  both sourced from a shared `useOrgMenuItems` hook extracted from
+  `OrgMenuLinks.tsx` so nav stays in sync across surfaces. Wired into
+  `app/orgs/[orgslug]/(withmenu)/layout.tsx`. Verified live in-browser via
+  the full dev stack (`npx learnhouse dev`) at desktop width: rebrand,
+  sidebar, active-route highlighting, and empty-state routing all confirmed
+  working with no console errors.
+  - **Known limitation**: live mobile/tablet viewport verification was not
+    possible — the browser automation tool's `resize_window` did not
+    actually shrink the rendered viewport in this environment, so the
+    `< lg` bottom tab bar is unverified live (code-reviewed only: same
+    `useOrgMenuItems` source, `lg:hidden` gate).
+  - **Intentionally deferred**: the "Made with LearnHouse" attribution
+    watermark (`components/Objects/Watermark.tsx`) still reads LearnHouse —
+    left alone as a licensing/free-tier attribution feature, not core shell
+    branding; revisit only with an explicit decision on it.
+
 ## Important Decisions
 - Product name: LearnOrbit
 - Tagline: Where learning connects.

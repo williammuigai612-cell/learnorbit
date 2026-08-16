@@ -32,25 +32,25 @@ export function isLightColor(hex: string): boolean {
 /**
  * Tailwind class sets for menu elements on a dynamic primary-color background.
  *
- * - No primaryColor → default gray theme
+ * - No primaryColor → LearnOrbit default theme (design-system tokens)
  * - Dark primaryColor → white foreground
  * - Light primaryColor → dark foreground with subtle overlays
  */
 export function getMenuColorClasses(primaryColor: string) {
   if (!primaryColor) {
     return {
-      text: 'text-gray-700',
-      textMuted: 'text-gray-500',
-      hoverBg: 'hover:bg-gray-100',
-      iconBtn: 'hover:bg-gray-100 text-gray-600',
+      text: 'text-foreground',
+      textMuted: 'text-muted-foreground',
+      hoverBg: 'hover:bg-muted',
+      iconBtn: 'hover:bg-muted text-muted-foreground hover:text-foreground',
       searchBg:
-        'bg-white text-black placeholder:text-black/40 focus:ring-black/5 focus:border-black/20 nice-shadow',
+        'bg-muted text-foreground placeholder:text-muted-foreground focus:ring-ring/30 focus:border-ring',
       searchIcon:
-        'text-black/40 group-focus-within:text-black/60',
-      signUpBtn: 'bg-black text-white hover:bg-gray-800',
-      profileHover: 'hover:bg-gray-50',
-      profileName: 'text-gray-900',
-      profileMuted: 'text-gray-500',
+        'text-muted-foreground group-focus-within:text-foreground',
+      signUpBtn: 'bg-primary text-primary-foreground hover:bg-primary-hover',
+      profileHover: 'hover:bg-muted',
+      profileName: 'text-foreground',
+      profileMuted: 'text-muted-foreground',
       logoFilter: 'none',
     }
   }

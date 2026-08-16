@@ -21,10 +21,21 @@ const BUILTIN: Record<string, Builtin> = {
 // Default order when an org has no custom menu config.
 const DEFAULT_ORDER = ['courses', 'library', 'podcasts', 'communities', 'playgrounds', 'store']
 
-function MenuLinks(props: { orgslug: string; primaryColor?: string }) {
+export type OrgMenuItem = {
+  key: string
+  label: string
+  Icon: any
+  href: string
+  external: boolean
+}
+
+// Shared nav-item resolution (config-driven when an org customizes its menu,
+// else feature-gated defaults) — used by the header's mobile menu, the
+// desktop sidebar, and the mobile bottom tab bar so all three surfaces always
+// agree on what's navigable.
+export function useOrgMenuItems(orgslug: string): OrgMenuItem[] {
   const { t } = useTranslation()
   const org = useOrg() as any
-  const colors = getMenuColorClasses(props.primaryColor || '')
 
   const rf = org?.config?.config?.resolved_features
   const isEnabled = (feature: string) => rf?.[feature]?.enabled === true
@@ -38,7 +49,7 @@ function MenuLinks(props: { orgslug: string; primaryColor?: string }) {
       ? [...configItems].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       : DEFAULT_ORDER.map((type, i) => ({ type, enabled: true, order: i, label: '', url: '' }))
 
-  const rendered = source
+  return source
     .map((item: any) => {
       if (item.type === 'custom') {
         if (!item.enabled || !item.url) return null
@@ -47,7 +58,7 @@ function MenuLinks(props: { orgslug: string; primaryColor?: string }) {
           key: `custom-${item.url}`,
           label: item.label || item.url,
           Icon: menuIcon(item.icon),
-          href: external ? item.url : getUriWithOrg(props.orgslug, item.url),
+          href: external ? item.url : getUriWithOrg(orgslug, item.url),
           external,
         }
       }
@@ -59,11 +70,16 @@ function MenuLinks(props: { orgslug: string; primaryColor?: string }) {
         key: item.type,
         label: item.label || t(meta.labelKey),
         Icon: meta.Icon,
-        href: getUriWithOrg(props.orgslug, meta.link),
+        href: getUriWithOrg(orgslug, meta.link),
         external: false,
       }
     })
-    .filter(Boolean) as any[]
+    .filter(Boolean) as OrgMenuItem[]
+}
+
+function MenuLinks(props: { orgslug: string; primaryColor?: string }) {
+  const colors = getMenuColorClasses(props.primaryColor || '')
+  const rendered = useOrgMenuItems(props.orgslug)
 
   return (
     <div className="ps-1">
