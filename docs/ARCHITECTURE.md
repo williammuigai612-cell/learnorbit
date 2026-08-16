@@ -135,6 +135,86 @@ Findings:
   second channel locally — same `tenancy: single` local-dev limitation
   documented under Phase 1B.
 
+### Videos (Phase 2A) — `ChannelVideo` as a thin discovery layer over the existing `Activity` video infrastructure
+Investigated: `apps/api/src/db/courses/activities.py` (`Activity`, `ActivityTypeEnum.TYPE_VIDEO`),
+`apps/api/src/db/courses/courses.py` (`Course.org_id` FK), `apps/api/src/db/courses/chapter_activities.py`
+(`ChapterActivity.activity_id` as the existing int-FK-to-Activity convention),
+`apps/api/src/db/resource_authors.py` (generic string-keyed authorship), and the full video pipeline surveyed
+during the Phase 2 pre-implementation analysis: `services/courses/activities/video.py`, `services/utils/hls_jobs.py`,
+`services/utils/caption_jobs.py`, `services/courses/transfer/storage_utils.py`, `routers/stream.py`.
+
+Findings:
+- LearnHouse already has a complete, production-grade video pipeline — upload, local/S3 storage, HLS
+  transcoding, AI captions, Range-request/HLS streaming, RBAC-gated serving — but every piece of it is wired to
+  `Activity.course_id` → `Chapter` → `Course`. `Course` is a heavyweight, SEO-rich curriculum object (versioning,
+  SCORM, contributors, drip scheduling). There is no existing concept of a standalone "post a video to my
+  channel" object — a video is always a lesson inside a structured course today.
+- `docs/PRD.md`'s golden path ("discover a channel → follow → watch a video") is a channel-level content post,
+  not "enroll in a course." Reusing `Course` directly for every channel video would drag along curriculum-only
+  fields that don't apply to a single discoverable video post.
+- Cascade chain confirmed in code (not guessed): `Organization.id` ← `Course.org_id`
+  (`ondelete="CASCADE"`, `courses.py:73`) ← `Activity.course_id` (`ondelete="CASCADE"`,
+  `activities.py:61`), and `Activity.org_id` also directly `ondelete="CASCADE"` from `Organization.id`
+  (`activities.py:57`). So `Activity` rows are always removed automatically when their `Organization` or
+  `Course` is deleted — already safe today, before any LearnOrbit change.
+- `Activity` is referenced elsewhere in the codebase by integer `id` (see `ChapterActivity.activity_id`), not by
+  `activity_uuid` — `activity_uuid` is indexed but **not** DB-unique-constrained, so it isn't a safe FK target.
+  The existing convention for a real relational reference to an `Activity` row is the integer PK.
+- `ResourceAuthor.resource_uuid` is a bare string, not FK-typed to a specific table — confirms the codebase's
+  existing pattern of generic, loosely-coupled authorship links that a new `ChannelVideo` doesn't need to
+  duplicate; authorship can be added later the same way if needed, out of scope for this decision.
+
+Decision: **add a new `ChannelVideo` table** — a thin discovery/metadata row per channel-published video —
+rather than modifying `Activity` or repurposing `Course`. `Activity` remains the sole owner of upload, storage,
+processing, streaming, HLS, and captions, unchanged. `ChannelVideo` only answers "what videos does this channel
+have, with what academic metadata, in what publish state" — it is looked up by channel (org) for
+discovery/listing, and joined to its `Activity` row to render playback.
+
+```
+Organization (channel)
+      │  org_id (FK, CASCADE)
+      ▼
+ChannelVideo  ── activity_id (FK, CASCADE, UNIQUE) ──▶  Activity (TYPE_VIDEO)  →  existing upload/HLS/captions/streaming
+```
+
+**Proposed `ChannelVideo` schema** (not yet created — no migration, no model file written):
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `int`, PK | |
+| `channelvideo_uuid` | `str`, indexed | Public identifier, matching the existing `org_uuid`/`course_uuid`/`activity_uuid`/`resource_uuid` convention |
+| `org_id` | `int`, FK → `organization.id`, `ondelete="CASCADE"`, indexed | Channel ownership. Stored directly (not only derived via `Activity.org_id`) so "list this channel's videos" doesn't require a join — same reasoning as `organizationfollow.org_id` in Phase 1C |
+| `activity_id` | `int`, FK → `activity.id`, `ondelete="CASCADE"`, **unique**, indexed | The underlying video's storage/streaming/HLS/captions record. One `ChannelVideo` per `Activity` (1:1) — the unique constraint prevents two channel posts pointing at the same video. Referenced by integer `id`, not `activity_uuid` (see Findings) |
+| `title` | `str` | |
+| `description` | `str \| None` | |
+| `thumbnail_image` | `str \| None` | Storage key/filename, mirrors `Course.thumbnail_image` — optional; can later be backfilled from the HLS pipeline's sprite/thumbnail output instead of requiring a manual upload |
+| `published` | `bool`, default `False` | Draft vs. live — matches the existing `Activity.published` / `Course.published` convention |
+| `visibility` | `str`, default `"public"` | Plain growable string column, not a native enum — same convention as `channel_type` (Phase 1A): e.g. `"public"` \| `"unlisted"`. Controls discovery-listing/search inclusion **only**; actual viewer access control stays on `Activity.lock_type`, unchanged |
+| `creation_date` | `str` | Matches the existing `str(datetime.now())` convention used by `Activity`, `ChapterActivity`, `ResourceAuthor` — not a native `datetime` column |
+| `update_date` | `str` | |
+| `subject` | `str \| None` | Flexible free-text column, not an enum/lookup table — per `docs/PRD.md` §4's explicit "don't hard-code to one examination body" |
+| `topic` | `str \| None` | Same |
+| `level` | `str \| None` | Class/grade/course level |
+| `institution_context` | `str \| None` | Curriculum/institution context |
+| `resource_type` | `str \| None` | Exam/resource type |
+
+No manual `order` column: a channel's video list sorts reverse-chronologically by `creation_date` — matches
+`docs/PRD.md` §5's explicit non-goal of algorithmic/curated ranking, so nothing beyond a timestamp is needed.
+
+**Deletion/cascade implications**:
+- Deleting the `Organization` (channel) already cascades to `Course` → `Activity`; adding `ChannelVideo.org_id`
+  with its own `ondelete="CASCADE"` removes the `ChannelVideo` row directly rather than depending on the
+  `Activity` cascade path — belt-and-suspenders, matching the diligence already applied in Phase 1A/1C.
+  `ChannelVideo.activity_id`'s own `ondelete="CASCADE"` is a second, independent guarantee: no orphaned
+  `ChannelVideo` row can ever point at a deleted `Activity`, however the deletion happens (channel delete,
+  course delete, or a direct activity delete).
+- Deleting the `Course` a video's `Activity` lives in cascades to `Activity`, which cascades to `ChannelVideo` —
+  the channel post disappears along with its underlying video, as expected.
+- Deleting only the `ChannelVideo` row (unpublishing/removing a channel post) does **not** cascade upward — the
+  underlying `Activity`/course lesson is untouched. This asymmetry is intentional: a creator can remove a video
+  from channel discovery without deleting a lesson that might still be used inside its course.
+- No changes to `Activity`'s own FKs/cascade behavior are needed or proposed.
+
 ## Areas To Map
 - Frontend application
 - API/backend

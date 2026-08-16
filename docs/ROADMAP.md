@@ -18,12 +18,12 @@
 - [ ] Channel content listing
 
 ## Phase 2 — Educational Video
-- [ ] Video metadata
-- [ ] Video upload/storage
-- [ ] Video processing strategy
-- [ ] Video player
-- [ ] Video page
-- [ ] Subject/topic metadata
+- [x] Video metadata
+- [x] Video upload/storage
+- [x] Video processing strategy
+- [x] Video player
+- [x] Video page
+- [x] Subject/topic metadata
 
 ## Phase 3 — Shorts
 - [ ] Short video upload
