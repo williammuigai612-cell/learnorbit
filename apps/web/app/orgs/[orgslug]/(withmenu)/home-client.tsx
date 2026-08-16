@@ -9,10 +9,19 @@ import { getUriWithOrg } from '@services/config/config'
 import { getOrgLogoMediaDirectory } from '@services/media/media'
 import GeneralWrapperStyled from '@components/Objects/StyledElements/Wrappers/GeneralWrapper'
 import ChannelHeader from '@components/Objects/Channel/ChannelHeader'
+import ChannelVideosSection from '@components/Objects/Channel/ChannelVideosSection'
+import { CHANNEL_VIDEOS_CONTAINER_MARKER } from '@services/organizations/channelVideoUpload'
 
 export default function HomeClient({ orgslug }: { orgslug: string }) {
   const org = useOrg() as any
   const { data: courses, isLoading: coursesLoading } = useCourses(orgslug)
+  // The Phase 2F creator-upload flow lazily provisions a hidden per-channel
+  // container course (a video Activity always needs a course/chapter — see
+  // services/organizations/channelVideoUpload.ts) — it's an implementation
+  // detail, not a real course, so it never belongs in this list.
+  const visibleCourses = (courses || []).filter(
+    (c: any) => c?.extra_metadata?.[CHANNEL_VIDEOS_CONTAINER_MARKER] !== true
+  )
 
   const landingConfig = org?.config?.config?.customization?.landing || org?.config?.config?.landing
   const hasCustomLanding = landingConfig?.enabled
@@ -60,11 +69,16 @@ export default function HomeClient({ orgslug }: { orgslug: string }) {
       {hasCustomLanding ? (
         <LandingCustom landing={landingConfig} orgslug={orgslug} />
       ) : (
-        <LandingClassic
-          courses={courses || []}
-          orgslug={orgslug}
-          org_id={org.id}
-        />
+        <>
+          <LandingClassic
+            courses={visibleCourses}
+            orgslug={orgslug}
+            org_id={org.id}
+          />
+          <GeneralWrapperStyled>
+            <ChannelVideosSection orgId={org.id} orgslug={orgslug} />
+          </GeneralWrapperStyled>
+        </>
       )}
     </div>
   )

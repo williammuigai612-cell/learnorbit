@@ -15,15 +15,30 @@ export const queryKeys = {
     list: (orgSlug: string) => ['courses', orgSlug] as const,
     detail: (uuid: string) => ['course', uuid] as const,
     meta: (uuid: string) => ['course', uuid, 'meta'] as const,
+    byId: (id: number) => ['course', 'byId', id] as const,
     contributors: (uuid: string) => ['course', uuid, 'contributors'] as const,
     updates: (uuid: string) => ['course', uuid, 'updates'] as const,
     rights: (uuid: string) => ['course', uuid, 'rights'] as const,
   },
   activity: {
     detail: (uuid: string) => ['activity', uuid] as const,
+    byId: (id: number) => ['activity', 'byId', id] as const,
     editorBootstrap: (uuid: string) => ['activity', uuid, 'editor-bootstrap'] as const,
     versions: (uuid: string) => ['activity', uuid, 'versions'] as const,
     state: (uuid: string) => ['activity', uuid, 'state'] as const,
+  },
+  channelVideos: {
+    detail: (orgId: number, channelVideoId: number | string) =>
+      ['channelVideo', orgId, channelVideoId] as const,
+    // Phase 2G-3: an active filters object is appended to the key so each
+    // filter combination gets its own cache entry. Omitting `filters` (or
+    // passing none) keeps the original unfiltered key, and callers that
+    // invalidate with just `list(orgId)` still catch every filtered variant
+    // too — invalidateQueries matches by key prefix.
+    list: (orgId: number, filters?: { subject?: string; topic?: string; level?: string }) =>
+      filters && Object.keys(filters).length > 0
+        ? (['channelVideo', orgId, 'list', filters] as const)
+        : (['channelVideo', orgId, 'list'] as const),
   },
   trail: {
     org: (orgId: number) => ['trail', 'org', orgId] as const,
