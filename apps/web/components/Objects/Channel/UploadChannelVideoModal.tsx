@@ -3,7 +3,7 @@
 import React, { useId, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, CheckCircle2, Pencil, Upload, Video as VideoIcon } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clapperboard, Pencil, Upload, Video as VideoIcon } from 'lucide-react'
 import { constructAcceptValue } from '@/lib/constants'
 import { getUriWithOrg } from '@services/config/config'
 import { useUploadChannelVideo } from '@/hooks/queries/useChannelVideoUpload'
@@ -14,6 +14,7 @@ import { Input } from '@components/ui/input'
 import { Textarea } from '@components/ui/textarea'
 import { Label } from '@components/ui/label'
 import { Switch } from '@components/ui/switch'
+import { ToggleGroup, ToggleGroupItem } from '@components/ui/toggle-group'
 import {
   Select,
   SelectContent,
@@ -36,6 +37,10 @@ interface FormState {
   resource_type: string
   visibility: 'public' | 'unlisted'
   publish: boolean
+  /** Phase 3F: which existing ChannelVideo.content_format this upload
+   * creates. Upload-only — edit mode never changes an existing video's
+   * format. */
+  content_format: 'long' | 'short'
 }
 
 const EMPTY_FORM: FormState = {
@@ -48,6 +53,7 @@ const EMPTY_FORM: FormState = {
   resource_type: '',
   visibility: 'public',
   publish: false,
+  content_format: 'long',
 }
 
 /** Metadata editable via 2G-1's PUT .../videos/{id} — a subset of what's
@@ -199,6 +205,7 @@ export default function UploadChannelVideoModal({
           resource_type: form.resource_type.trim() || undefined,
           visibility: form.visibility,
           publish: form.publish,
+          content_format: form.content_format,
         },
         onProgress: (percent) => {
           setProgress(percent)
@@ -292,6 +299,43 @@ export default function UploadChannelVideoModal({
                 <div className="flex-1">
                   <p>{errorMessage}</p>
                 </div>
+              </div>
+            )}
+
+            {mode === 'upload' && (
+              <div className="space-y-1.5">
+                <Label htmlFor={`${formId}-format`}>
+                  {t('video.upload.format', { defaultValue: 'Format' })}
+                </Label>
+                <ToggleGroup
+                  id={`${formId}-format`}
+                  type="single"
+                  variant="outline"
+                  value={form.content_format}
+                  onValueChange={(v) => {
+                    if (v) setField('content_format', v as FormState['content_format'])
+                  }}
+                  disabled={isBusy}
+                  className="justify-start"
+                >
+                  <ToggleGroupItem value="long" aria-label={t('video.upload.formatLong', { defaultValue: 'Video' })} className="gap-1.5 px-3">
+                    <VideoIcon size={14} aria-hidden="true" />
+                    {t('video.upload.formatLong', { defaultValue: 'Video' })}
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="short" aria-label={t('video.upload.formatShort', { defaultValue: 'Short' })} className="gap-1.5 px-3">
+                    <Clapperboard size={14} aria-hidden="true" />
+                    {t('video.upload.formatShort', { defaultValue: 'Short' })}
+                  </ToggleGroupItem>
+                </ToggleGroup>
+                <p className="text-xs text-muted-foreground">
+                  {form.content_format === 'short'
+                    ? t('video.upload.formatShortHint', {
+                        defaultValue: 'Shorts appear in the global Shorts feed as well as this channel.',
+                      })
+                    : t('video.upload.formatLongHint', {
+                        defaultValue: 'Appears in this channel’s video listing.',
+                      })}
+                </p>
               </div>
             )}
 

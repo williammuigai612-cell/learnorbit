@@ -67,6 +67,10 @@ export interface ChannelVideoCreateInput {
   description?: string
   thumbnail_image?: string
   visibility?: 'public' | 'unlisted'
+  /** Phase 3F: 'short' creates a Short, per the existing content_format
+   * discriminator (docs/ARCHITECTURE.md § "Videos / Shorts (Phase 3A)").
+   * Omitted defaults to 'long' server-side (Phase 3B). */
+  content_format?: 'long' | 'short'
   subject?: string
   topic?: string
   level?: string

@@ -125,6 +125,9 @@ export interface UploadChannelVideoInput {
   resource_type?: string
   visibility: 'public' | 'unlisted'
   publish: boolean
+  /** Phase 3F: 'short' creates a Short via the same upload pipeline. Omitted
+   * defaults to 'long' — see ChannelVideoCreateInput. */
+  content_format?: 'long' | 'short'
 }
 
 /** Full creator upload flow: container course/chapter → video Activity upload
@@ -165,6 +168,7 @@ export async function uploadChannelVideo(
       title: input.title,
       description: input.description || undefined,
       visibility: input.visibility,
+      content_format: input.content_format || 'long',
       subject: input.subject || undefined,
       topic: input.topic || undefined,
       level: input.level || undefined,

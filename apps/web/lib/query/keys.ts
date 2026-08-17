@@ -43,6 +43,11 @@ export const queryKeys = {
   trail: {
     org: (orgId: number) => ['trail', 'org', orgId] as const,
   },
+  shorts: {
+    // Global, cross-org queue (Phase 3E) — one cache entry, no per-org/filter
+    // variants, mirroring the unscoped GET /shorts endpoint (Phase 3C).
+    queue: () => ['shorts', 'queue'] as const,
+  },
   folders: {
     list: (orgId: number) => ['folders', orgId] as const,
     detail: (uuid: string) => ['folder', uuid] as const,
