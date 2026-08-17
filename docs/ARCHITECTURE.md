@@ -317,6 +317,18 @@ for Shorts specifically). Neither is acceptable.
 - Notifications of any kind.
 - Broader engagement systems (share tracking, view counts, engagement-based surfacing).
 
+**9. Phase 3G implementation (Channel Shorts Section) — realizes point 6 above.** `ChannelShortsSection.tsx` +
+`ChannelShortCard.tsx` (new) render this channel's own Shorts on the channel home page via
+`useChannelVideos(orgId, { content_format: 'short' })` — the exact same hook/endpoint/cache-key convention as the
+Phase 2E `ChannelVideosSection`, just a different filter value; no new query hook or endpoint. As a corollary,
+`ChannelVideosSection` was corrected to pass `content_format: 'long'` — previously it queried with no
+`content_format` filter at all, so Shorts were silently included in its 16:9 grid alongside long-form videos.
+No tabs were introduced for this — §17's Videos/Shorts/Resources/About tab system remains a future decision; 3G
+ships as a page section, consistent with the channel page's existing section-stack layout, and is deliberately
+filterless (no subject/topic/level controls, unlike `ChannelVideosSection`). `UploadChannelVideoModal` gained an
+optional `defaultContentFormat` prop (upload mode only) so the Shorts section's own upload trigger preselects the
+existing Phase 3F Format toggle to "Short" rather than duplicating the upload form.
+
 **Deletion/cascade implications**: identical to Phase 2A — `content_format` is a plain column on the existing
 `ChannelVideo` row, so no new cascade path is introduced; deleting the channel, its container course, or the
 underlying `Activity` cascades exactly as already documented above.

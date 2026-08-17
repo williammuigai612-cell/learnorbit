@@ -10,6 +10,7 @@ import { getOrgLogoMediaDirectory } from '@services/media/media'
 import GeneralWrapperStyled from '@components/Objects/StyledElements/Wrappers/GeneralWrapper'
 import ChannelHeader from '@components/Objects/Channel/ChannelHeader'
 import ChannelVideosSection from '@components/Objects/Channel/ChannelVideosSection'
+import ChannelShortsSection from '@components/Objects/Channel/ChannelShortsSection'
 import { CHANNEL_VIDEOS_CONTAINER_MARKER } from '@services/organizations/channelVideoUpload'
 
 export default function HomeClient({ orgslug }: { orgslug: string }) {
@@ -76,6 +77,7 @@ export default function HomeClient({ orgslug }: { orgslug: string }) {
             org_id={org.id}
           />
           <GeneralWrapperStyled>
+            <ChannelShortsSection orgId={org.id} orgslug={orgslug} />
             <ChannelVideosSection orgId={org.id} orgslug={orgslug} />
           </GeneralWrapperStyled>
         </>

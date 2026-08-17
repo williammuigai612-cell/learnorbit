@@ -35,7 +35,10 @@ export const queryKeys = {
     // passing none) keeps the original unfiltered key, and callers that
     // invalidate with just `list(orgId)` still catch every filtered variant
     // too — invalidateQueries matches by key prefix.
-    list: (orgId: number, filters?: { subject?: string; topic?: string; level?: string }) =>
+    list: (
+      orgId: number,
+      filters?: { subject?: string; topic?: string; level?: string; content_format?: string }
+    ) =>
       filters && Object.keys(filters).length > 0
         ? (['channelVideo', orgId, 'list', filters] as const)
         : (['channelVideo', orgId, 'list'] as const),

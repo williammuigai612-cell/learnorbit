@@ -26,11 +26,13 @@
 - [x] Subject/topic metadata
 
 ## Phase 3 — Shorts
-- [ ] Short video upload
-- [ ] Vertical video viewer
-- [ ] Swipe/discovery experience
-- [ ] Short engagement
-- [ ] Creator/channel attribution
+- [x] Short video upload
+- [x] Vertical video viewer
+- [x] Swipe/discovery experience
+- [ ] Short engagement (deferred to Phase 4 — likes/comments/saves/shares/view counts; see `docs/ARCHITECTURE.md` §8)
+- [x] Creator/channel attribution
+- [x] Shorts channel section
+- [x] Shorts navigation entry
 
 ## Phase 4 — Social Learning
 - [ ] Home feed

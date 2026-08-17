@@ -44,16 +44,21 @@ export default function ChannelVideosSection({ orgId, orgslug }: ChannelVideosSe
   const { t } = useTranslation()
   const [filters, setFilters] = useState<ChannelVideoFilters>({})
 
+  // Phase 3G: this section is long-form only — Shorts get their own
+  // ChannelShortsSection via the same content_format filter, so they don't
+  // show up twice (once here as a 16:9 card, once there as a Short card).
+  const longFormFilters: ChannelVideoFilters = { ...filters, content_format: 'long' }
+
   // Unfiltered baseline — its only job is supplying the distinct Subject/
   // Topic/Level values for the filter dropdowns, so options never disappear
   // out from under a selection already made. When `filters` is empty this
   // shares its cache entry (and network request) with the query below.
-  const { data: allVideos } = useChannelVideos(orgId)
+  const { data: allVideos } = useChannelVideos(orgId, { content_format: 'long' })
   const filterOptions = useMemo(() => getChannelVideoFilterOptions(allVideos), [allVideos])
   const hasAnyVideosEver = (allVideos?.length ?? 0) > 0
 
   const hasActiveFilters = Boolean(filters.subject || filters.topic || filters.level)
-  const { data: videos, isLoading, isError, refetch, isRefetching } = useChannelVideos(orgId, filters)
+  const { data: videos, isLoading, isError, refetch, isRefetching } = useChannelVideos(orgId, longFormFilters)
 
   const setFilter = (field: FilterField, value: string) => {
     setFilters((prev) => {

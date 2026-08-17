@@ -1,8 +1,11 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useTranslation } from 'react-i18next'
+import { FilmSlate } from '@phosphor-icons/react'
 import { useOrgMenuItems } from '@components/Objects/Menus/OrgMenuLinks'
 import { useJoinBannerVisible, JOIN_BANNER_HEIGHT } from '@components/Objects/Banners/OrgJoinBanner'
+import { getUriWithOrg } from '@services/config/config'
 import { cn } from '@/lib/utils'
 
 const HEADER_HEIGHT = 60
@@ -12,12 +15,18 @@ const HEADER_HEIGHT = 60
 // styles/globals.css consumer in (withmenu)/layout.tsx) and mirrors the same
 // item set as the mobile bottom tab bar / header "more" menu.
 export function OrgSidebar({ orgslug }: { orgslug: string }) {
+  const { t } = useTranslation()
   const items = useOrgMenuItems(orgslug)
   const pathname = usePathname()
   const { isVisible: isJoinBannerVisible } = useJoinBannerVisible()
   const topOffset = (isJoinBannerVisible ? JOIN_BANNER_HEIGHT : 0) + HEADER_HEIGHT
 
-  if (items.length === 0) return null
+  // Shorts is a fixed, global destination — not a per-org, feature-gated
+  // menu item — so it's rendered here directly, outside useOrgMenuItems,
+  // prepended above the config-driven list. See docs/ARCHITECTURE.md §
+  // "Videos / Shorts (Phase 3A)" point 7 for the full decision.
+  const shortsHref = getUriWithOrg(orgslug, '/shorts')
+  const isShortsActive = pathname === shortsHref || pathname?.startsWith(`${shortsHref}/`)
 
   return (
     <aside
@@ -26,6 +35,17 @@ export function OrgSidebar({ orgslug }: { orgslug: string }) {
       style={{ top: topOffset, zIndex: 'var(--z-nav)' }}
     >
       <nav className="flex flex-col gap-1 p-3">
+        <Link href={shortsHref}>
+          <span
+            className={cn(
+              'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold transition-colors',
+              isShortsActive ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
+            )}
+          >
+            <FilmSlate size={22} weight={isShortsActive ? 'fill' : 'regular'} aria-hidden="true" />
+            <span className="truncate">{t('short.nav.label', { defaultValue: 'Shorts' })}</span>
+          </span>
+        </Link>
         {items.map((item) => {
           const isActive =
             !item.external &&

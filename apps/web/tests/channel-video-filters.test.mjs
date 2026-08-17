@@ -22,6 +22,21 @@ describe("normalizeChannelVideoFilters", () => {
       normalizeChannelVideoFilters({ subject: "Mathematics", topic: "", level: "Form 2" })
     ).toEqual({ subject: "Mathematics", level: "Form 2" });
   });
+
+  test("keeps a content_format filter (Phase 3G)", () => {
+    expect(normalizeChannelVideoFilters({ content_format: "short" })).toEqual({
+      content_format: "short",
+    });
+    expect(normalizeChannelVideoFilters({ content_format: "long" })).toEqual({
+      content_format: "long",
+    });
+  });
+
+  test("combines content_format with other filters", () => {
+    expect(
+      normalizeChannelVideoFilters({ content_format: "short", subject: "Mathematics" })
+    ).toEqual({ content_format: "short", subject: "Mathematics" });
+  });
 });
 
 describe("buildChannelVideoQueryParams", () => {
@@ -38,6 +53,16 @@ describe("buildChannelVideoQueryParams", () => {
   test("builds a query string for multiple filters, URL-encoded", () => {
     const qs = buildChannelVideoQueryParams({ subject: "Math & Science", level: "Form 2" });
     expect(qs).toBe("?subject=Math+%26+Science&level=Form+2");
+  });
+
+  test("builds a query string for content_format alone (Phase 3G)", () => {
+    expect(buildChannelVideoQueryParams({ content_format: "short" })).toBe("?content_format=short");
+    expect(buildChannelVideoQueryParams({ content_format: "long" })).toBe("?content_format=long");
+  });
+
+  test("combines content_format with other filters", () => {
+    const qs = buildChannelVideoQueryParams({ content_format: "short", subject: "Mathematics" });
+    expect(qs).toBe("?subject=Mathematics&content_format=short");
   });
 });
 

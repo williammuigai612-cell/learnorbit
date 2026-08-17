@@ -12,7 +12,7 @@
 - [x] Original LearnHouse web application opens locally
 
 ## Current Phase
-**Phase 3 — Shorts** (Phase 1 — Channels and Phase 2 — Educational Video are complete; Phase 3A–3F complete, 3G next; see below)
+**Phase 4 — Social Learning** (Phase 1 — Channels, Phase 2 — Educational Video, and Phase 3 — Shorts (3A–3H) are all complete; see below). Phase 4 has not started implementation — the current action is Phase 4 planning/scoping, per `docs/ROADMAP.md`.
 
 ## Status Snapshot
 - Phase 1 (1A–1C — Channels): complete
@@ -281,20 +281,148 @@
     Per user direction, 3F is being completed on code review + the automated
     test suite only; this blocks live verification for every future phase's
     UI work too until it's fixed in a dedicated task.
-- Next: Phase 3G (not yet started).
+- **Phase 3G (Channel Shorts Section): complete** — the channel home page
+  (`home-client.tsx`) now shows a dedicated "Shorts" section
+  (`ChannelShortsSection.tsx`) above the existing "Videos" section, reusing
+  the already-shipped `GET /orgs/{org_id}/videos?content_format=short`
+  filter (Phase 3B/3C) via the existing `useChannelVideos` hook/cache-key
+  convention — no new endpoint, service, or query hook. New
+  `ChannelShortCard.tsx` is a 9:16 vertical card variant of the Phase 2E
+  `ChannelVideoCard` (same thumbnail/badge/chip/edit-trigger conventions),
+  linking to the existing `/shorts/{id}` viewer (Phase 3D) via the
+  established `getUriWithOrg` convention, laid out as a horizontal-scroll row
+  rather than the long-form grid. Deliberately filterless in 3G (no
+  subject/topic/level controls — see Next Actions) and always rendered, even
+  with zero Shorts, using the same empty-state pattern as
+  `ChannelVideosSection`. No tabs were introduced — §17's aspirational
+  Videos/Shorts/Resources/About tab system remains undone; this is a page
+  section, matching the channel page's existing section-stack layout.
+  - **Correctness fix**: `ChannelVideosSection` (the long-form "Videos"
+    section) previously queried `GET /orgs/{org_id}/videos` with no
+    `content_format` filter, so it silently included Shorts in its 16:9
+    grid. It now explicitly passes `content_format: 'long'`, so Shorts only
+    ever appear in the new Shorts section.
+  - **Upload flow**: `UploadChannelVideoModal` gained an optional
+    `defaultContentFormat` prop (upload mode only) so the Shorts section's
+    "Upload" trigger opens with the existing Phase 3F Format toggle
+    preselected to "Short" — the toggle itself is unchanged and still
+    editable; edit mode is unaffected.
+  - **No backend, API, player, or HLS changes** — `content_format=short`
+    filtering, RBAC (`_require_channel_admin`, published+public visibility),
+    and playback all reuse Phase 3B/3C/2A infrastructure unchanged. No
+    likes/comments/saves/share — unchanged Phase 4 deferral.
+  - **Tests (TDD)**: 4 new tests in
+    `tests/channel-video-filters.test.mjs` for the `content_format` filter
+    param (written first, confirmed failing, then implemented) — file now 16
+    tests total, all passing. Full `bun test tests`: 112 passed, 12 failed, 1
+    error — the same pre-existing, unrelated baseline documented since Phase
+    3E/3F (`billing-internal-key.test.mjs`, `catalog-pagination.test.mjs`
+    missing fixture, `ar.json` coverage timeout); 4 more passing than Phase
+    3F's 108-pass baseline, matching the 4 new tests. Backend regression
+    check (no backend files touched): `test_channel_videos_service.py` +
+    `test_channel_videos_router.py` + `test_shorts_router.py` +
+    `test_channel_video_model.py` — 49 passed, 0 failed. ESLint
+    (`lint:strict`) clean on all 8 changed/new files (pre-existing
+    errors/warnings elsewhere in the repo are unrelated). `tsc --noEmit`
+    remains blocked at config validation by the same pre-existing repo-wide
+    `tsconfig.json` `baseUrl` issue logged since Phase 2G-3;
+    `tsconfig.json` itself untouched.
+  - **Known limitation — live browser verification not possible**: same
+    app-wide Next.js `[dynamicSegment]/(routeGroup)/page.tsx` 404 regression
+    logged under Phase 3F (`/orgs/[orgslug]/(withmenu)/*` — including the
+    channel home page these sections mount on — is unreachable in this local
+    dev server). Already exhaustively isolated as unrelated to any phase's
+    code; not re-diagnosed here. Per instruction, no Next.js/package version
+    change was attempted. Verified via code review + the test suites above
+    only.
+  - **Deferred within 3G**: subject/topic/level filtering for the Shorts
+    section (parity with `ChannelVideosSection`'s existing filters) — kept
+    out to hold the diff narrow; a reasonable fast-follow, not required for
+    3G's core requirement.
+- **Phase 3H (Shorts Navigation): complete** — closes the last outstanding
+  piece of the Phase 3A decision: `docs/ARCHITECTURE.md` §7's fixed,
+  non-configurable Shorts entry on both `OrgSidebar.tsx` and
+  `OrgBottomTabBar.tsx`. Both now render a Shorts entry directly (same
+  icon/active-state/spacing/a11y conventions as every other nav item, icon
+  via `@phosphor-icons/react`'s `FilmSlate` matching the existing nav icon
+  library) — rendered outside the per-org `useOrgMenuItems`/`BUILTIN`
+  system entirely, sourced from `getUriWithOrg(orgslug, '/shorts')` instead
+  of the config-driven item list, since Shorts is a global destination, not
+  a per-org toggleable feature. `OrgBottomTabBar.tsx`'s `MAX_TABS` dropped
+  from `4` to `3` per the Phase 3A decision, keeping total visible mobile
+  destinations at Shorts + 3 configurable + "More" = 5 — unchanged from
+  `docs/DESIGN_SYSTEM.md` §14's documented 4–5 cap, not exceeding it. Both
+  surfaces now always render (the previous `items.length === 0` early
+  return is gone), since Shorts is present regardless of an org's own
+  feature configuration.
+  - **New landing route**: neither surface previously had anywhere to link
+    — `/orgs/[orgslug]/(withmenu)/shorts/` only contained
+    `[channelvideoid]/` (Phase 3D/3E's single-Short viewer); there was no
+    `page.tsx` at `/shorts` itself, so a nav link to it would have 404'd.
+    Added a minimal `/shorts` index route (`page.tsx`/`shorts-index.tsx`/
+    `loading.tsx`, mirroring the sibling route's param-await convention)
+    that redirects into the first Short of the existing, unmodified global
+    queue (`useShortsQueue`, Phase 3E — no new hook or endpoint), falling
+    back to a "No Shorts yet" empty state (`docs/DESIGN_SYSTEM.md` §20) if
+    none are published anywhere yet. The Phase 3D/3E viewer itself
+    (`short.tsx`) was not touched.
+  - **No engagement rail** — per the Phase 3A deferral (§8) and this
+    phase's explicit scope, no likes/comments/saves/shares/view counts were
+    added anywhere in this phase.
+  - **Tests**: no existing test file exercises `OrgSidebar`/
+    `OrgBottomTabBar`/menu components — no React component-render harness
+    exists in `apps/web/tests/` (every existing test there is a pure-logic
+    `bun:test` file) — so per instruction not to invent a test framework for
+    this single change, none was added. `lint:strict` clean on all five
+    changed/new files. Full `bun test tests`: 112 passed, 12 failed, 1
+    error — identical to the pre-existing baseline documented since
+    Phase 3E/3F/3G (`billing-internal-key.test.mjs`,
+    `catalog-pagination.test.mjs`'s missing fixture, the `ar.json` coverage
+    timeout); no new failures, no new passes. `tsc --noEmit` remains
+    blocked repo-wide by the same pre-existing `tsconfig.json` `baseUrl`
+    issue logged since Phase 2G-3, unrelated to this change;
+    `tsconfig.json` itself untouched.
+  - **Security**: navigation-only change — no new endpoints, no new
+    client-server surface, no auth logic added or modified. The `/shorts`
+    index route's redirect target comes from the existing, unmodified
+    `GET /shorts` public endpoint (Phase 3C) via the existing
+    `useShortsQueue` hook (Phase 3E); the single-Short viewer it redirects
+    into enforces the same published+public/403 rules as before (Phase
+    3C/3D), unchanged.
+  - **Known limitation — live browser verification not possible**: same
+    app-wide Next.js `[dynamicSegment]/(routeGroup)/page.tsx` 404
+    regression logged under Phase 3F/3G (`/orgs/[orgslug]/(withmenu)/*` —
+    including `OrgSidebar`/`OrgBottomTabBar`'s mount point and the new
+    `/shorts` index route — is unreachable in this local dev server). Not
+    re-diagnosed here (already exhaustively isolated as unrelated to any
+    phase's code under Phase 3F); no dev-server infrastructure was started
+    or modified to work around it. Verified via code review, lint, and the
+    test suite above only.
+- **Phase 3 overall: COMPLETE** — 3A through 3H (architecture decision,
+  schema, API, viewer, swipe navigation, upload flow, channel section, nav
+  entry) are all done; Phase 3H above closes the last outstanding piece of
+  the Phase 3A decision. Deferred, not blocking: Phase 3G's subject/topic/
+  level filtering for the channel Shorts section (fast-follow, not required
+  for 3G's core requirement, unchanged from its original deferral) and
+  Phase 4's engagement systems (likes, comments, saves, shares, view
+  counts, notifications, ranking — explicitly out of scope per
+  `docs/ARCHITECTURE.md` §8).
 
 ## Current Task
 Phase 2 (2A–2G-3) is functionally complete for V1 scope; 2G-4 (thumbnail
 upload) remains deferred to a later creator/UI polish phase (see entry
-below). Phase 3A (Shorts architecture decision), 3B (`ChannelVideo.content_format`
-migration + model), 3C (Shorts API), 3D (Standalone Shorts Viewer), 3E
-(Swipe / Sequential Shorts Navigation), and 3F (Creator Shorts Upload Flow)
-are complete; see the Status Snapshot entries above and
-`docs/ARCHITECTURE.md` § "Videos / Shorts (Phase 3A)".
-**Phase 3 itself is NOT complete** — 3G remains. Next: Phase 3G. Also
-outstanding: the app-wide Next.js dynamic-segment/route-group routing bug
-logged under Phase 3F blocks live browser verification for `/orgs/*` pages
-until fixed in a dedicated task.
+below). Phase 3A–3H (architecture decision, schema/model, API, viewer,
+swipe navigation, upload flow, channel section, nav entry) are all
+complete; see the Status Snapshot entries above and
+`docs/ARCHITECTURE.md` § "Videos / Shorts (Phase 3A)". **Phase 3 overall is
+now complete.** Outstanding, non-blocking items: subject/topic/level
+filtering for the Shorts channel section (deferred within 3G, see above),
+and the app-wide Next.js dynamic-segment/route-group routing bug logged
+under Phase 3F, which blocks live browser verification for `/orgs/*` pages
+(including 3H's changes) until fixed in a dedicated task. **Current task:
+Phase 4 — Social Learning planning/scoping** (`docs/ROADMAP.md`) — Phase 4
+implementation has not started; scoping (data model, endpoints, UI surfaces
+for likes/comments/saves/shares/notifications) comes before any code.
 
 ## Completed Product Features
 - **Phase 1A — Channel Foundation**: `Organization` extended with a
@@ -711,13 +839,17 @@ Separate from the product-phase track above; sequenced per `docs/UI_UX_IMPLEMENT
    instead (see Phase 1B entry above). Only matters for local manual
    testing/demoing multiple channels side by side; not a blocker for
    staging/production, which will run on a real domain.
-5. Phase 3A (Shorts architecture decision), 3B (`ChannelVideo.content_format`
-   migration + model), 3C (Shorts API), 3D (Standalone Shorts Viewer), 3E
-   (Swipe / Sequential Shorts Navigation), and 3F (Creator Shorts Upload
-   Flow) complete — see Status Snapshot above and `docs/ARCHITECTURE.md` §
-   "Videos / Shorts (Phase 3A)". **Phase 3 overall is NOT complete** — 3G
-   remains. Next: Phase 3G.
-6. **Blocking, app-wide local-dev bug to fix before any further live browser
+5. Phase 3A–3H complete — see Status Snapshot above and
+   `docs/ARCHITECTURE.md` § "Videos / Shorts (Phase 3A)". **Phase 3 overall
+   is now complete.** Outstanding, non-blocking from 3G: subject/topic/level
+   filtering for the channel Shorts section (deferred, not required for
+   3G's core requirement).
+6. **Next: Phase 4 — Social Learning planning/scoping** (`docs/ROADMAP.md`)
+   — begin by scoping the data model, endpoints, and UI surfaces for likes,
+   comments, saves, sharing, and basic notifications before writing any
+   implementation code, per root `CLAUDE.md`'s `PLAN → IMPLEMENT → TEST →
+   REVIEW → COMMIT` workflow.
+7. **Blocking, app-wide local-dev bug to fix before any further live browser
    verification**: Next.js 16.2.9 in this environment 404s every route
    shaped `[dynamicSegment]/(routeGroup)/page.tsx` — which is exactly
    `/orgs/[orgslug]/(withmenu)/page.tsx`, so **every** org-scoped page is

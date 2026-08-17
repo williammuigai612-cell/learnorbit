@@ -69,7 +69,11 @@ export interface ChannelVideoEditData {
   resource_type?: string | null
 }
 
-function formFor(mode: 'upload' | 'edit', channelVideo?: ChannelVideoEditData): FormState {
+function formFor(
+  mode: 'upload' | 'edit',
+  channelVideo?: ChannelVideoEditData,
+  defaultContentFormat?: FormState['content_format']
+): FormState {
   if (mode === 'edit' && channelVideo) {
     return {
       ...EMPTY_FORM,
@@ -82,7 +86,7 @@ function formFor(mode: 'upload' | 'edit', channelVideo?: ChannelVideoEditData): 
       resource_type: channelVideo.resource_type || '',
     }
   }
-  return EMPTY_FORM
+  return { ...EMPTY_FORM, content_format: defaultContentFormat ?? EMPTY_FORM.content_format }
 }
 
 interface UploadChannelVideoModalProps {
@@ -95,6 +99,10 @@ interface UploadChannelVideoModalProps {
   /** Required when mode="edit" — the video being edited, used to prefill the
    * form and as the target of the update mutation. */
   channelVideo?: ChannelVideoEditData
+  /** Upload-only (Phase 3G): preselects the Format toggle so a trigger
+   * opened from the Shorts section starts on "Short" instead of the default
+   * "Video" — the toggle remains editable, this only sets the initial value. */
+  defaultContentFormat?: 'long' | 'short'
 }
 
 export default function UploadChannelVideoModal({
@@ -102,6 +110,7 @@ export default function UploadChannelVideoModal({
   orgslug,
   mode = 'upload',
   channelVideo,
+  defaultContentFormat,
 }: UploadChannelVideoModalProps) {
   const { t } = useTranslation()
   const formId = useId()
@@ -110,7 +119,7 @@ export default function UploadChannelVideoModal({
   const [open, setOpen] = useState(false)
   const [phase, setPhase] = useState<Phase>('idle')
   const [progress, setProgress] = useState(0)
-  const [form, setForm] = useState<FormState>(() => formFor(mode, channelVideo))
+  const [form, setForm] = useState<FormState>(() => formFor(mode, channelVideo, defaultContentFormat))
   const [file, setFile] = useState<File | null>(null)
   const [fieldErrors, setFieldErrors] = useState<{ title?: string; file?: string }>({})
   const [errorMessage, setErrorMessage] = useState('')
@@ -122,7 +131,7 @@ export default function UploadChannelVideoModal({
   const resetForm = () => {
     setPhase('idle')
     setProgress(0)
-    setForm(formFor(mode, channelVideo))
+    setForm(formFor(mode, channelVideo, defaultContentFormat))
     setFile(null)
     setFieldErrors({})
     setErrorMessage('')

@@ -8,9 +8,12 @@ export interface ChannelVideoFilters {
   subject?: string
   topic?: string
   level?: string
+  /** Phase 3G: filters by ChannelVideo.content_format ('long' | 'short'),
+   * same backend param as subject/topic/level (GET /orgs/{org_id}/videos). */
+  content_format?: 'long' | 'short'
 }
 
-const FILTER_KEYS: (keyof ChannelVideoFilters)[] = ['subject', 'topic', 'level']
+const FILTER_KEYS: (keyof ChannelVideoFilters)[] = ['subject', 'topic', 'level', 'content_format']
 
 /** Drops empty/whitespace-only values so `{ subject: '' }` behaves like "no
  * filter" — keeps query keys and query params from treating "" as real. */
