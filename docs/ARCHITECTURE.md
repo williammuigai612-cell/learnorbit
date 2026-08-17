@@ -215,6 +215,112 @@ No manual `order` column: a channel's video list sorts reverse-chronologically b
   from channel discovery without deleting a lesson that might still be used inside its course.
 - No changes to `Activity`'s own FKs/cascade behavior are needed or proposed.
 
+### Videos / Shorts (Phase 3A) — extend `ChannelVideo` with a `content_format` discriminator; global `/shorts` discovery reuses the org-scoped API with a cross-org aggregation layer
+
+Investigated: `apps/api/src/db/channel_videos.py`, `apps/api/src/services/orgs/channel_videos.py` (Phase 2A-2G,
+above), `apps/api/src/services/courses/activities/video.py`, `apps/api/src/services/utils/hls_jobs.py`,
+`apps/api/src/services/utils/hls_transcode.py`, `apps/api/src/routers/stream.py`, `apps/web/components/Objects/Menus/OrgMenu.tsx`,
+`OrgSidebar.tsx`, `OrgBottomTabBar.tsx`, `OrgMenuLinks.tsx` (`useOrgMenuItems`), and `docs/DESIGN_SYSTEM.md` §14/§16.
+
+**1. `ChannelVideo` extension, not a new `Short` table.** A Short is a `ChannelVideo` row like any other — same
+ownership (`org_id`), same underlying `Activity` (upload/storage/HLS/captions), same publish/visibility gate,
+same academic metadata shape. Nothing about "vertical, short-duration" content requires a different relational
+shape; it only requires a way to filter/query for it. Per the project's established architecture-decision
+process (§ "Architecture Decision Process" below), extending is preferred over a new entity unless inspection
+proves the existing shape can't support the requirement — it can.
+
+**2. `content_format` discriminator.** Add `ChannelVideo.content_format: str = "long"` (plain growable string
+column, same convention as `visibility` and `channel_type` — no native Postgres enum, so new formats don't need
+an `ALTER TYPE` migration later). Shorts set `content_format = "short"`. Existing rows backfill to `"long"` via
+`server_default`, so every video published before Phase 3 keeps behaving exactly as it does today — this is
+purely additive, matching the precedent set by `channel_type`'s backfill in Phase 1A.
+
+**3. Upload/storage/HLS/captions/streaming stay entirely shared and untouched.** Confirmed in code: the HLS
+transcode ladder (`hls_transcode.py`) derives rendition width from height via `scale=-2:h`, so it already
+preserves source aspect ratio — a 9:16 upload transcodes correctly today with **zero pipeline changes**. The
+video-activity upload endpoint's content-type check (`video/mp4`/`video/webm`) is also orientation-agnostic. A
+Short is created through the exact same `create_video_activity` → `create_channel_video` flow as a long-form
+video (Phase 2F's container-course pattern reused unchanged), with `content_format: "short"` passed at
+`ChannelVideo`-create time.
+
+**4. Global `/shorts` discovery.** Per product decision, Shorts discovery is NOT scoped to one channel by
+default — `/shorts` is a cross-org, reverse-chronological queue of every publicly discoverable Short. The
+existing `list_channel_videos` service function is org-scoped by design (`ChannelVideo.org_id == org.id`) and
+stays that way for channel pages. Global discovery needs a **new, separate service function** (e.g.
+`list_public_shorts`) that queries `ChannelVideo` **without** an `org_id` filter, reusing the exact same
+visibility predicate already proven in `list_channel_videos`'s non-admin branch:
+`published == True AND visibility == "public"`, plus `content_format == "short"`. This is a new query shape, not
+a new table — same model, same columns, same security predicate, different WHERE clause and no per-org scoping.
+Ordering: `ORDER BY creation_date DESC` — identical to the existing per-channel listing, no new sort logic.
+
+**5. Visibility/security rules (unchanged from Phase 2C, restated for Shorts):**
+- Draft (`published = False`) and `unlisted` (`visibility != "public"`) Shorts are excluded from both the
+  channel listing query and the new global discovery query by the same WHERE predicate — there is no separate
+  "hide from global feed" flag to maintain; one predicate governs both surfaces.
+- Fetching a single Short by id (e.g. for the swipe viewer's deep-link/share case) reuses `get_channel_video`
+  unchanged: published+public is visible to anyone, everything else 403s unless the caller is this channel's
+  owner/admin (`is_org_admin` via `resolve_acting_user_id`) — no new authorization code path.
+- Creation/publish/delete/update of a Short reuses `_require_channel_admin` unchanged — only a channel's
+  owner/admins can create or publish content for that channel, exactly as for long-form videos. No
+  frontend-only authorization is introduced; every check remains server-side, as established in Phase 2C/2F.
+- The global discovery endpoint is anonymous-readable (like `GET /orgs/{id}/videos`) but the response can only
+  ever contain rows that already passed the `published+public` predicate — there is no code path where an
+  unpublished or unlisted Short reaches it, mirroring the "not found vs. not visible" non-leaking design already
+  used by `get_channel_video`.
+- Storage paths are never exposed directly: the global feed endpoint returns `ChannelVideoRead`-shaped rows
+  (numeric `activity_id`/`org_id`), and playback continues to resolve through the existing RBAC-gated
+  `stream.py`/HLS endpoints exactly as Phase 2D's watch page already does — no new media-serving code, no direct
+  storage-key exposure.
+
+**6. Channel-level Shorts remain available alongside global discovery.** `list_channel_videos` gains a
+`content_format` filter parameter (same pattern as its existing `subject`/`topic`/`level` filters) so a
+channel's own page can show "this channel's Shorts" via the same, already-shipped org-scoped endpoint — no
+duplicate listing logic between the channel view and the global feed; both are thin filter variations over one
+underlying table and one visibility predicate.
+
+**7. Navigation: a fixed, non-configurable primary destination — not a new nav system, not a blind 7th menu
+item.** Investigated `useOrgMenuItems` (`OrgMenuLinks.tsx`): the existing sidebar (`OrgSidebar.tsx`) and mobile
+bottom tab bar (`OrgBottomTabBar.tsx`, `MAX_TABS = 4` + a fixed "More" overflow entry) both render from this one
+config-driven, **per-org feature-gated** list (`courses`/`library`/`podcasts`/`communities`/`playgrounds`/
+`store`, resolved against `org.config.resolved_features`). Shorts is architecturally different from every item
+in that list: it's a **global**, always-on destination, not a per-org toggleable feature — so it does not belong
+in the `useOrgMenuItems` system at all, and appending it as a 7th config-driven entry would either bump an
+existing destination out of the mobile tab bar's `MAX_TABS = 4` cap into "More" (breaking that destination's
+existing one-tap access) or itself land past position 4 into "More" (failing the "one-tap access" requirement
+for Shorts specifically). Neither is acceptable.
+  - **Decision**: Shorts becomes a **fixed, non-configurable entry rendered alongside — not through —
+    `useOrgMenuItems`**, on both existing nav surfaces (no third nav surface introduced):
+    - **Mobile** (`OrgBottomTabBar.tsx`, < `lg`): render a fixed Shorts tab, and reduce the config-driven slice
+      from `MAX_TABS = 4` to `3`. Total visible destinations stays at Shorts + 3 configurable + "More" = 5,
+      which still satisfies `docs/DESIGN_SYSTEM.md` §14's documented "4–5 top-level destinations max" — the
+      budget is preserved, not exceeded, by trading one configurable slot for the fixed Shorts slot.
+    - **Desktop** (`OrgSidebar.tsx`, ≥ `lg`): render the same fixed Shorts entry prepended above the
+      config-driven list. The sidebar has no documented hard item-count cap, so this is lower-risk, but the
+      fixed-entry pattern is kept identical across both surfaces for consistency (§14: "every nav surface uses
+      the same active-state language").
+    - Precedent for a fixed, non-config-driven nav element already exists in the same component today: `OrgMenu.tsx`'s
+      header icon row (Progress/Trail, Boards, Copilot, Dashboard, Help) is a *third* place primary destinations
+      already live outside `useOrgMenuItems`, gated by `resolved_features`/auth state rather than the org-menu
+      config — Shorts joins that same "fixed destination outside the configurable list" pattern rather than
+      inventing a new one. It is not added there instead of the sidebar/tab-bar, because those header icons are
+      `hidden md:flex` (desktop-only) and Shorts explicitly needs one-tap access on mobile too, which only the
+      tab bar provides.
+  - This keeps exactly two navigation surfaces (sidebar, tab bar), preserves the documented destination cap,
+    and gives Shorts guaranteed one-tap access on both breakpoints without a new nav paradigm.
+
+**8. Explicitly deferred to Phase 4 (not part of Phase 3):**
+- Likes, comments, saves/bookmarks — no schema, no endpoints, no UI wiring.
+- Any ranking or recommendation logic for `/shorts` ordering — V1 is strictly reverse-chronological
+  (`creation_date DESC`), matching `docs/PRD.md` §5's explicit non-goal.
+- Personalization of the global feed (e.g. "followed channels first") — out of scope until Phase 4/UI-3 revisits
+  home-feed behavior.
+- Notifications of any kind.
+- Broader engagement systems (share tracking, view counts, engagement-based surfacing).
+
+**Deletion/cascade implications**: identical to Phase 2A — `content_format` is a plain column on the existing
+`ChannelVideo` row, so no new cascade path is introduced; deleting the channel, its container course, or the
+underlying `Activity` cascades exactly as already documented above.
+
 ## Areas To Map
 - Frontend application
 - API/backend

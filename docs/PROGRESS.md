@@ -12,7 +12,7 @@
 - [x] Original LearnHouse web application opens locally
 
 ## Current Phase
-**Phase 2 — Educational Video** (Phase 1 — Channels is complete; see below)
+**Phase 3 — Shorts** (Phase 1 — Channels and Phase 2 — Educational Video are complete; Phase 3A–3F complete, 3G next; see below)
 
 ## Status Snapshot
 - Phase 1 (1A–1C — Channels): complete
@@ -25,17 +25,276 @@
   infrastructure confirmed, but out of scope for current Phase 2
   educational-video functionality (creator polish, not a functional
   dependency of any other Phase 2 unit)
+- **Phase 3A (Shorts architecture decision): complete** — documentation only,
+  no code. See `docs/ARCHITECTURE.md` § "Videos / Shorts (Phase 3A)" for the
+  full decision. Summary:
+  - Extend the existing `ChannelVideo` table with a `content_format`
+    (`"long"` default | `"short"`) discriminator — no new `Short` table.
+    Upload/storage/HLS/captions/streaming are confirmed format-agnostic
+    (`hls_transcode.py`'s `scale=-2:h` already preserves source aspect ratio,
+    so vertical video transcodes correctly with zero pipeline changes).
+  - Shorts discovery is a **global `/shorts` feed**: a new cross-org listing
+    (no `org_id` filter) reusing the existing `published+public` visibility
+    predicate and reverse-chronological ordering already proven in
+    `list_channel_videos`. Channel pages keep showing that channel's own
+    Shorts via the same org-scoped endpoint plus a new `content_format`
+    filter — one table, one predicate, two filtered views.
+  - Navigation: Shorts becomes a **fixed, non-configurable entry** on both
+    existing nav surfaces (`OrgBottomTabBar`, `OrgSidebar`) rendered
+    alongside — not through — the per-org, feature-gated
+    `useOrgMenuItems`/`BUILTIN` system (Shorts isn't a per-org toggleable
+    feature). Mobile's configurable slice shrinks from `MAX_TABS=4` to `3` so
+    total visible destinations (Shorts + 3 + "More") stays within
+    `docs/DESIGN_SYSTEM.md` §14's documented 4–5 cap, rather than exceeding
+    it.
+  - Security: create/publish/update/delete reuse `_require_channel_admin`
+    unchanged; single-Short fetch reuses `get_channel_video`'s existing
+    published+public-vs-403 split; the global feed endpoint can only ever
+    return rows that already pass the same predicate; no direct storage-path
+    exposure — playback stays behind the existing RBAC-gated
+    `stream.py`/HLS endpoints.
+  - Deferred to Phase 4: likes, comments, saves, ranking/recommendation,
+    personalized feed, notifications, broader engagement systems.
+- **Phase 3B (`ChannelVideo.content_format` migration + model): complete** —
+  added `ChannelVideo.content_format: str = "long"` per the Phase 3A schema
+  decision, via migration `a4286436d85d_add_content_format_to_channel_video`
+  (server_default-backed, so every pre-Phase-3 row backfills to `"long"` and
+  keeps behaving exactly as before). Verified against the real local
+  Postgres instance.
+- **Phase 3C (Shorts API): complete** — `GET /orgs/{org_id}/videos` extended
+  with a `content_format=long|short` filter (existing subject/topic/level/
+  institution/resource-type filters and authorization behavior unchanged;
+  omitting `content_format` preserves prior behavior). New public, cross-org
+  `GET /shorts` endpoint (mounted at `/api/v1/shorts`) for global Shorts
+  discovery, reusing `list_channel_videos`' proven visibility predicate via a
+  new `list_public_shorts` service function rather than duplicating query
+  logic. Global discovery requires `content_format="short"`,
+  `published=true`, and `visibility="public"`, ordered by `creation_date
+  DESC`; no frontend filtering is used for security. Existing channel-scoped
+  cross-org isolation is unchanged.
+  - Verified: 107 relevant backend tests passed, 0 failed (TDD throughout —
+    new tests written and watched to fail before implementation); ruff
+    (pinned CI version, 0.15.9) clean on all changed/new Python files.
+    Confirmed anonymous access to `/shorts`; exclusion of draft, unlisted/
+    private, and long-form videos from the global feed; multi-org Shorts
+    aggregation and reverse-chronological ordering; existing channel-scoped
+    cross-org isolation preserved. `test_root_router.py` has a pre-existing
+    `ImportError` unrelated to this change — confirmed present on the
+    unmodified baseline, not caused by Phase 3C.
+  - No frontend changes, no packages installed, nothing committed or pushed.
+- **Phase 3D (Standalone Shorts Viewer): complete** — new route
+  `/orgs/[orgslug]/(withmenu)/shorts/[channelvideoid]`, resolving under the
+  existing org-scoped routing convention (`page.tsx`, `loading.tsx`,
+  `error.tsx`, `short.tsx`); single tenancy resolves the browser path as
+  `/shorts/{id}`, same as Phase 2D's `/videos/{id}`. Reuses
+  `VideoActivity`/`LearnHousePlayer` unchanged and the existing `ChannelVideo`
+  query/activity/course infrastructure (`useChannelVideo`/
+  `useChannelVideoActivity`/`useChannelVideoCourse`) — no new authorization
+  mechanism, no new API. Presents the Short in the documented 9:16 layout with
+  a bottom-left attribution overlay (channel avatar, name, channel-type badge,
+  title, subject/topic metadata). States covered: loading, not found,
+  inaccessible/unpublished Short, not-a-Short (a long-form video hit at a
+  Shorts URL is rejected rather than played), and player error (inherited
+  from the existing player's own retry overlay). Autoplay-blocked fallback
+  was **not** implemented — `LearnHousePlayer` doesn't expose that state to
+  consumers, so no artificial state was invented for it. Swipe/next-previous
+  queue navigation is explicitly **not** part of 3D and remains Phase 3E.
+  - Fixed a layout bug caught during verification: `Video.tsx`'s 16:9
+    `aspect-video` wrapper sits behind an intermediate auto-height `<div>`,
+    so a simple percentage-height override couldn't reach it and the player
+    collapsed to a sliver instead of filling the 9:16 frame. Fixed by pinning
+    the wrapper chain to `position: absolute; inset: 0` off the Shorts frame
+    (scoped via `<style jsx global>`) rather than editing the shared player —
+    confirmed both the HLS/video.js path and the YouTube iframe path now
+    fill the frame exactly.
+  - Verified live via the full dev stack (Postgres/Redis already running, API
+    + `next dev` started for this session): temporarily flipped two existing
+    `ChannelVideo` rows to `content_format="short"` for testing (reverted
+    after). Confirmed the 9:16 frame renders and fills correctly, the
+    attribution overlay renders (avatar, name, badge, title, subject/topic
+    chip), back navigation works, and all four error/guard states render
+    their correct copy. Unpublished-Short 403 verified against the existing
+    API (both direct `curl` and an in-page anonymous `fetch`); a long-form
+    video at a Shorts URL correctly renders "not a Short" instead of playing.
+    YouTube playback stalled on buffering in this sandboxed environment —
+    the same limitation already present on Phase 2D's identical embed, not
+    specific to this page; frame sizing and player controls (mute, captions,
+    settings) were confirmed rendering correctly. No console errors caused
+    by this implementation. ESLint clean on all four new files. `tsc
+    --noEmit` remains blocked repo-wide by the pre-existing TypeScript 6
+    `baseUrl` deprecation issue already logged under Phase 2G-3;
+    `tsconfig.json` itself was confirmed untouched. No backend, package, or
+    lockfile changes. Nothing committed or pushed.
+- **Phase 3E (Swipe / Sequential Shorts Navigation): complete** — adds a
+  queue/navigation layer around the Phase 3D viewer, unchanged in itself.
+  Queue source is the existing `GET /shorts` (Phase 3C), wrapped by a new
+  `services/organizations/shorts.ts: listPublicShorts` + `hooks/queries/
+  useShorts.ts: useShortsQueue` (React Query, `staleTime: 60_000`, new
+  `queryKeys.shorts.queue()` key) — no second Shorts listing endpoint, no
+  client-side ranking/filtering; the API's `published+public` predicate and
+  reverse-chronological order are the only ordering used. All logic lives in
+  the existing `short.tsx` (no extraction was needed — the whole queue is one
+  Short at a time, so there was nothing to split out): the current Short's
+  position is found by matching its id against the fetched queue, giving
+  prev/next ids; a Short reached by direct link that isn't in the public
+  queue (e.g. an admin's own unpublished draft) degrades to a singleton — no
+  prev/next, identical to plain Phase 3D behavior.
+  - **Mobile swipe**: a real vertical `overflow-y-scroll` + `scroll-snap-type:
+    y mandatory` container around the existing frame, with an empty
+    `snap-start` spacer above/below wherever a prev/next id exists. Swiping a
+    spacer into view — genuine touch scrolling, no gesture library — is
+    detected via `IntersectionObserver` (threshold 0.6) and triggers the same
+    navigation as the desktop controls. Disabled at `sm:` and up
+    (`sm:snap-none sm:overflow-visible`, spacers `sm:hidden`), where desktop
+    instead gets `ChevronUp`/`ChevronDown` icon buttons beside the frame
+    (`aria-label`, `disabled` at either end) plus `ArrowUp`/`ArrowDown`
+    keyboard handlers (ignored while focus is in a form field).
+  - **Navigation/state**: advancing calls `router.push` (`next/navigation`)
+    to `/shorts/{id}` via the existing `getUriWithOrg` convention — a real
+    client-side route change (confirmed via `performance.getEntriesByType
+    ('navigation')` staying at a single `"navigate"` entry across several
+    hops, i.e. never a full reload), so the existing org shell/layout is
+    never torn down. Each hop remounts `short.tsx` for the new id (standard
+    Next.js App Router behavior for a changed dynamic segment — this is not a
+    persistent single-instance carousel), which is also what guarantees the
+    previous Short's player is fully disposed rather than continuing in the
+    background (verified: exactly one `<video>`/`<iframe>` in the DOM after
+    navigating, never two). The cached queue list (`staleTime: 60_000`) means
+    each hop's *queue* fetch is a cache hit; only that Short's own
+    `ChannelVideo`/`Activity`/`Course` data fetches fresh, same as any other
+    Phase 3D/2D navigation.
+  - **Skip-on-error (requirement 6)**: if the id being navigated to errors
+    (404/403) or turns out not to be a Short, and the (now-stale) queue still
+    has a next-or-previous id to try, the page auto-navigates past it instead
+    of showing the error screen — capped at 8 consecutive auto-skips via an
+    `?autoskip=` counter threaded through the URL (a plain `useRef` counter
+    would reset on every hop, since each is a real remount, so it can't cap
+    anything on its own). With nowhere left to skip to, it falls through to
+    the unchanged Phase 3D `ShortUnavailableState`.
+  - Verified live via the full dev stack, reusing the Phase 3D
+    workaround (temporarily marking real `ChannelVideo` rows
+    `content_format="short"`, reverted after): queue loads (3-item queue
+    confirmed via direct `GET /shorts`); initial Short renders; `Next Short`/
+    `Previous Short` buttons both navigate correctly and correctly
+    disable/enable at each end of the queue; `ArrowUp`/`ArrowDown` do the
+    same and correctly no-op at the boundaries; URL updates on every hop
+    with no full reload (Navigation Timing API check above); end-of-queue
+    (no further id) confirmed at both ends; a mid-queue item that changed
+    from Short to long-form *after* the queue was cached (simulating a race)
+    was skipped automatically and safely, landing on the next valid Short
+    with no visible error and no console errors; exactly one player element
+    ever present in the DOM, confirming the previous Short's player doesn't
+    keep playing after navigating away; not-found and not-a-Short states
+    (with an empty/no-skip-target queue) still render exactly as in Phase
+    3D, unregressed. No console errors caused by this implementation.
+    ESLint clean on all changed/new files. `bun test tests`: 104 pass, 12
+    fail, 1 error — all in `billing-internal-key.test.mjs`, the `ar.json`
+    coverage timeout, and `catalog-pagination.test.mjs`, the same pre-existing
+    failures already documented as unrelated under Phase 2G-3; none touch
+    `queryKeys` or Shorts. `tsc --noEmit` remains blocked by the same
+    pre-existing repo-wide `baseUrl` issue (unchanged from Phase 3D). No
+    backend, package, or lockfile changes. Nothing committed or pushed.
+  - **Known limitation**: the swipe gesture's `IntersectionObserver` firing
+    could not be verified through an actual touch/scroll gesture live —
+    this environment's browser tab reports `document.visibilityState:
+    "hidden"` at all times (a different manifestation of the same automation
+    limitation already logged for `resize_window` under UI-1/Phase 2D/2E),
+    and Chrome throttles `IntersectionObserver` callbacks entirely for
+    hidden tabs — confirmed by attaching a fresh, isolated observer to the
+    same elements, which also never fired. Verified instead: the scroller
+    becomes genuinely scrollable and the spacer's geometry fully overlaps
+    the viewport once scrolled (via `getBoundingClientRect`), and the exact
+    same `goTo` navigation function the observer calls was independently
+    proven correct via the button and keyboard tests above — the only
+    unverified link is specifically "does the browser fire the
+    `IntersectionObserver` callback," which is standard, spec-defined
+    browser behavior blocked here purely by tab visibility, not by this
+    code.
+- **Phase 3F (Creator Shorts Upload Flow): complete** — the backend side of
+  this (`ChannelVideo.content_format` accepted at create time, per Phase
+  3B/3C) already existed; 3F's actual new work was entirely frontend. Reused
+  the existing Phase 2F upload pipeline unchanged: `UploadChannelVideoModal.tsx`
+  gained a `content_format: 'long' | 'short'` field on its `FormState`
+  (default `'long'`), surfaced only in upload mode as a `ToggleGroup` ("Video"
+  / "Short") above the file input, with a one-line hint per mode. No new
+  uploader, no new form, no new endpoint. `UploadChannelVideoInput`
+  (`channelVideoUpload.ts`) and `ChannelVideoCreateInput`
+  (`channelVideos.ts`) both gained an optional `content_format` field;
+  `uploadChannelVideo()` now passes `input.content_format || 'long'` straight
+  through to the existing `createChannelVideo()` call — the only
+  Shorts-specific line in the whole flow. Container-course orchestration,
+  Activity upload/progress, draft/publish, and React Query invalidation are
+  all unchanged from Phase 2F. No engagement controls (likes/comments/saves)
+  were added, per Phase 4 deferral.
+  - **Tests (TDD)**: new `apps/web/tests/channel-video-upload-content-format.test.mjs`
+    (4 tests, `bun:test` with `mock.module` on every `uploadChannelVideo`
+    collaborator) — written first and confirmed failing (payload missing
+    `content_format`) before the implementation, then passing after: Short
+    upload sends `content_format: "short"`; omitting it defaults to `"long"`;
+    explicit `"long"` stays `"long"`; publish-now still fires for a Short.
+    Backend Shorts-creation coverage (`content_format="short"` persists at
+    create time, defaults to `"long"`, unauthorized/anonymous creation
+    blocked) already existed from Phase 3B/3C
+    (`test_channel_video_model.py`, `test_channel_videos_service.py`,
+    `test_channel_videos_router.py`) — re-ran all four targeted backend
+    files (49 passed, 0 failed) to confirm no regression; no backend files
+    were touched this phase.
+  - **Security**: unchanged from Phase 2F/3A — `POST /orgs/{org_id}/videos`
+    still requires `_require_channel_admin` server-side regardless of
+    `content_format`; the frontend toggle is presentation only. Verified via
+    the existing backend test suite (anonymous → 401, regular member → 403),
+    not re-verified live in-browser (see limitation below).
+  - **Full suite**: `bun test tests` — 108 passed, 12 failed, 1 error, all
+    pre-existing and already documented under Phase 3E
+    (`billing-internal-key.test.mjs`, `catalog-pagination.test.mjs`'s missing
+    fixture, the `ar.json` coverage timeout) — 4 more passing than Phase 3E's
+    104 baseline, matching the 4 new tests added here; none of the
+    pre-existing failures touch Shorts/channel-video code. ESLint clean on
+    all four changed/new frontend files. `tsc --noEmit` remains blocked
+    repo-wide by the same pre-existing TypeScript 6 `baseUrl` issue logged
+    since Phase 2G-3, unrelated to this change.
+  - **Known limitation — live browser verification not possible this
+    session**: discovered (not caused by this phase's diff — confirmed via
+    `git diff`, which is clean on every file involved) that this local dev
+    environment's Next.js 16.2.9 cannot currently resolve **any** route
+    shaped `[dynamicSegment]/(routeGroup)/page.tsx`. `/orgs/[orgslug]/(withmenu)/page.tsx`
+    matches that shape, so every org-scoped page — not just Shorts/upload —
+    404s (`/`, `/orgs/{slug}`, `/orgs/{slug}/videos`, `/orgs/{slug}/dash/*`,
+    all of it). Isolated by direct HTTP testing across multiple route trees,
+    independent of both bundlers (`next dev --turbopack` and `--webpack` fail
+    identically) and independent of middleware (`proxy.ts`/`instance/info`
+    all resolve correctly; the backend API itself is fully healthy):
+    `/board/[boarduuid]/page.tsx` (dynamic segment, no route group) → 200;
+    `/admin/(dashboard)/organizations/[orgId]/page.tsx` (route group *then*
+    dynamic segment) → 200; `/orgs/[orgslug]/(withmenu)/page.tsx` (dynamic
+    segment *then* route group) → 404. A separate, real issue was found and
+    fixed along the way (not this bug's cause, but a real local-machine
+    misconfiguration): a stray `package.json`/`package-lock.json` sitting
+    directly in the WSL home directory (for an unrelated project) was being
+    picked up by Turbopack's workspace-root auto-detection instead of
+    `apps/web`, which the user resolved by moving those files aside. This
+    Next.js dynamic-segment/route-group bug is a pre-existing, app-wide
+    regression unrelated to any Phase 3F code (confirmed against
+    unmodified/committed files) — fixing it would mean either changing the
+    pinned Next.js version or restructuring the `(withmenu)` route group
+    relative to `[orgslug]` app-wide, both far outside this phase's scope.
+    Per user direction, 3F is being completed on code review + the automated
+    test suite only; this blocks live verification for every future phase's
+    UI work too until it's fixed in a dedicated task.
+- Next: Phase 3G (not yet started).
 
 ## Current Task
-Phase 2A–2F complete (architecture decision, `ChannelVideo` model/migration,
-API endpoints, the standalone video watch page, the channel video listing,
-and the creator video upload flow — see entries below and
-`docs/ARCHITECTURE.md` § "Videos (Phase 2A)"). Phase 2G-1–2G-3 complete
-(metadata update endpoint + edit UI, Subject/Topic/Level filtering — see
-entries below). Phase 2G-4 (thumbnail upload) investigated and deferred, not
-implemented (see entry below). Next: Phase 2 is functionally complete for V1
-scope; move to roadmap Phase 3 (Shorts), or pick up the deferred
-thumbnail-upload work in a later creator/UI polish phase.
+Phase 2 (2A–2G-3) is functionally complete for V1 scope; 2G-4 (thumbnail
+upload) remains deferred to a later creator/UI polish phase (see entry
+below). Phase 3A (Shorts architecture decision), 3B (`ChannelVideo.content_format`
+migration + model), 3C (Shorts API), 3D (Standalone Shorts Viewer), 3E
+(Swipe / Sequential Shorts Navigation), and 3F (Creator Shorts Upload Flow)
+are complete; see the Status Snapshot entries above and
+`docs/ARCHITECTURE.md` § "Videos / Shorts (Phase 3A)".
+**Phase 3 itself is NOT complete** — 3G remains. Next: Phase 3G. Also
+outstanding: the app-wide Next.js dynamic-segment/route-group routing bug
+logged under Phase 3F blocks live browser verification for `/orgs/*` pages
+until fixed in a dedicated task.
 
 ## Completed Product Features
 - **Phase 1A — Channel Foundation**: `Organization` extended with a
@@ -439,8 +698,7 @@ Separate from the product-phase track above; sequenced per `docs/UI_UX_IMPLEMENT
    (signup fields, invites, billing caps) — deliberately left ungated in
    Phase 1A to keep the change small.
 2. Phase 2G-1–2G-3 complete; 2G-4 (thumbnail upload) deferred to a later
-   creator/UI polish phase (see Phase 2G-4 entry above). Consider roadmap
-   Phase 3 (Shorts) as the next unit of work.
+   creator/UI polish phase (see Phase 2G-4 entry above).
 3. Commit Phase 1A + Phase 1B + Phase 1C + Phase 2A–2G-3 changes (2G-4 was
    investigation-only — no code to commit).
 4. **Local-dev limitation to revisit**: full multi-channel navigation
@@ -453,3 +711,20 @@ Separate from the product-phase track above; sequenced per `docs/UI_UX_IMPLEMENT
    instead (see Phase 1B entry above). Only matters for local manual
    testing/demoing multiple channels side by side; not a blocker for
    staging/production, which will run on a real domain.
+5. Phase 3A (Shorts architecture decision), 3B (`ChannelVideo.content_format`
+   migration + model), 3C (Shorts API), 3D (Standalone Shorts Viewer), 3E
+   (Swipe / Sequential Shorts Navigation), and 3F (Creator Shorts Upload
+   Flow) complete — see Status Snapshot above and `docs/ARCHITECTURE.md` §
+   "Videos / Shorts (Phase 3A)". **Phase 3 overall is NOT complete** — 3G
+   remains. Next: Phase 3G.
+6. **Blocking, app-wide local-dev bug to fix before any further live browser
+   verification**: Next.js 16.2.9 in this environment 404s every route
+   shaped `[dynamicSegment]/(routeGroup)/page.tsx` — which is exactly
+   `/orgs/[orgslug]/(withmenu)/page.tsx`, so **every** org-scoped page is
+   currently unreachable in the local dev server (not specific to Shorts;
+   see the Phase 3F entry above for the isolation testing that pinned this
+   down). Confirmed unrelated to any app code change (clean `git diff` on
+   every file involved) and unrelated to the separate stray-lockfile fix
+   already applied. Needs a dedicated task: either find/pin a Next.js patch
+   version without the regression, or restructure `(withmenu)` relative to
+   `[orgslug]`.
