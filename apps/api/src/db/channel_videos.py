@@ -35,6 +35,13 @@ class ChannelVideo(SQLModel, table=True):
     thumbnail_image: Optional[str] = None
     published: bool = Field(default=False)
     visibility: str = Field(default="public")
+    # Plain growable string, not a native enum — same convention as
+    # `visibility`/Organization.channel_type (see docs/ARCHITECTURE.md §
+    # "Videos / Shorts (Phase 3A)"). "long" = existing long-form video
+    # behavior (default, so every pre-Phase-3 row is unaffected); "short" =
+    # a Short. Indexed: Phase 3C's global Shorts feed and per-channel
+    # filtering both query on this column.
+    content_format: str = Field(default="long", index=True)
     creation_date: str = ""
     update_date: str = ""
     subject: Optional[str] = None

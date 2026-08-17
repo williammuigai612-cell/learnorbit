@@ -36,6 +36,7 @@ class ChannelVideoCreate(SQLModel):
     description: Optional[str] = None
     thumbnail_image: Optional[str] = None
     visibility: str = "public"
+    content_format: str = "long"
     subject: Optional[str] = None
     topic: Optional[str] = None
     level: Optional[str] = None
@@ -53,6 +54,7 @@ class ChannelVideoUpdate(SQLModel):
     left unchanged."""
     title: Optional[str] = None
     description: Optional[str] = None
+    content_format: Optional[str] = None
     subject: Optional[str] = None
     topic: Optional[str] = None
     level: Optional[str] = None
@@ -70,6 +72,7 @@ class ChannelVideoRead(SQLModel):
     thumbnail_image: Optional[str] = None
     published: bool
     visibility: str
+    content_format: str
     creation_date: str
     update_date: str
     subject: Optional[str] = None
@@ -173,6 +176,7 @@ async def create_channel_video(
         description=data.description,
         thumbnail_image=data.thumbnail_image,
         visibility=data.visibility or "public",
+        content_format=data.content_format or "long",
         subject=data.subject,
         topic=data.topic,
         level=data.level,
@@ -197,6 +201,7 @@ async def list_channel_videos(
     level: Optional[str] = None,
     institution_context: Optional[str] = None,
     resource_type: Optional[str] = None,
+    content_format: Optional[str] = None,
 ) -> list[ChannelVideoRead]:
     org = await _get_org_or_404(org_id, db_session)
 
@@ -224,11 +229,35 @@ async def list_channel_videos(
         statement = statement.where(ChannelVideo.institution_context == institution_context)
     if resource_type is not None:
         statement = statement.where(ChannelVideo.resource_type == resource_type)
+    if content_format is not None:
+        statement = statement.where(ChannelVideo.content_format == content_format)
 
     # Newest-first — per docs/ARCHITECTURE.md § "Videos (Phase 2A)", no manual
     # order column; PRD explicitly rules out algorithmic/curated ranking.
     statement = statement.order_by(ChannelVideo.creation_date.desc())
 
+    rows = (await db_session.execute(statement)).scalars().all()
+    return [ChannelVideoRead.model_validate(r) for r in rows]
+
+
+async def list_public_shorts(db_session: AsyncSession) -> list[ChannelVideoRead]:
+    """Global, cross-org Shorts discovery feed (Phase 3C).
+
+    Unlike `list_channel_videos`, this is deliberately NOT scoped to one
+    org_id and takes no `current_user` — there is no admin-preview branch,
+    only the same published+public predicate `list_channel_videos` already
+    proves for anonymous viewers. See docs/ARCHITECTURE.md §
+    "Videos / Shorts (Phase 3A)", point 4.
+    """
+    statement = (
+        select(ChannelVideo)
+        .where(
+            ChannelVideo.content_format == "short",
+            ChannelVideo.published == True,  # noqa: E712
+            ChannelVideo.visibility == "public",
+        )
+        .order_by(ChannelVideo.creation_date.desc())
+    )
     rows = (await db_session.execute(statement)).scalars().all()
     return [ChannelVideoRead.model_validate(r) for r in rows]
 

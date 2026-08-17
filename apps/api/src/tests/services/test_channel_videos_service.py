@@ -28,6 +28,7 @@ from src.services.orgs.channel_videos import (
     delete_channel_video,
     get_channel_video,
     list_channel_videos,
+    list_public_shorts,
     set_channel_video_published,
     update_channel_video,
 )
@@ -139,12 +140,58 @@ async def test_admin_can_create_channel_video(db, org, admin_user, activity):
     assert video.activity_id == activity.id
     assert video.published is False
     assert video.visibility == "public"
+    assert video.content_format == "long"
 
     row = (await db.execute(
         select(ChannelVideo).where(ChannelVideo.id == video.id)
     )).scalars().first()
     assert row is not None
     assert row.org_id == org.id
+
+
+# ── content_format (Phase 3A/3B): Shorts discriminator ──────────────────────
+
+@pytest.mark.asyncio
+async def test_create_defaults_content_format_to_long(db, org, admin_user, activity):
+    video = await create_channel_video(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        data=ChannelVideoCreate(activity_id=activity.id, title="Untitled"),
+    )
+    assert video.content_format == "long"
+
+
+@pytest.mark.asyncio
+async def test_create_short_persists_content_format(db, org, admin_user, activity):
+    video = await create_channel_video(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        data=ChannelVideoCreate(activity_id=activity.id, title="A Short", content_format="short"),
+    )
+    assert video.content_format == "short"
+
+    row = (await db.execute(
+        select(ChannelVideo).where(ChannelVideo.id == video.id)
+    )).scalars().first()
+    assert row.content_format == "short"
+
+
+@pytest.mark.asyncio
+async def test_legacy_channel_video_without_explicit_format_is_long(db, org, activity):
+    """Simulates a row written before Phase 3A (no content_format supplied at
+    the ORM layer, same as what the migration's server_default backfills for
+    every pre-existing production row) — must read back as long-form."""
+    legacy = ChannelVideo(
+        channelvideo_uuid="channelvideo_legacy",
+        org_id=org.id,
+        activity_id=activity.id,
+        title="Pre-Phase-3 video",
+        creation_date=str(datetime.now()),
+        update_date=str(datetime.now()),
+    )
+    db.add(legacy)
+    await db.commit()
+    await db.refresh(legacy)
+
+    assert legacy.content_format == "long"
 
 
 @pytest.mark.asyncio
@@ -295,6 +342,113 @@ async def test_list_filters_by_educational_metadata(db, org, admin_user, course)
     assert [v.subject for v in form1_only] == ["Biology"]
 
 
+# ── content_format filtering (Phase 3C) ─────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_list_channel_videos_filters_by_content_format_short(db, org, admin_user, course):
+    short = await _make_published_video(db, org, admin_user, course, "short1", content_format="short")
+    await _make_published_video(db, org, admin_user, course, "long1", content_format="long")
+
+    results = await list_channel_videos(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db, content_format="short",
+    )
+    assert [v.id for v in results] == [short.id]
+
+
+@pytest.mark.asyncio
+async def test_list_channel_videos_filters_by_content_format_long(db, org, admin_user, course):
+    await _make_published_video(db, org, admin_user, course, "short1", content_format="short")
+    long_video = await _make_published_video(db, org, admin_user, course, "long1", content_format="long")
+
+    results = await list_channel_videos(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db, content_format="long",
+    )
+    assert [v.id for v in results] == [long_video.id]
+
+
+@pytest.mark.asyncio
+async def test_list_channel_videos_omitted_content_format_returns_both(db, org, admin_user, course):
+    short = await _make_published_video(db, org, admin_user, course, "short1", content_format="short")
+    long_video = await _make_published_video(db, org, admin_user, course, "long1", content_format="long")
+
+    results = await list_channel_videos(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+    )
+    assert {v.id for v in results} == {short.id, long_video.id}
+
+
+# ── Global Shorts discovery: list_public_shorts (Phase 3C) ─────────────────
+
+@pytest.mark.asyncio
+async def test_public_shorts_returns_published_public_short(db, org, admin_user, course):
+    short = await _make_published_video(db, org, admin_user, course, "short1", content_format="short")
+
+    results = await list_public_shorts(db)
+    assert [v.id for v in results] == [short.id]
+
+
+@pytest.mark.asyncio
+async def test_public_shorts_excludes_unpublished(db, org, admin_user, activity):
+    await create_channel_video(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        data=ChannelVideoCreate(activity_id=activity.id, title="Draft Short", content_format="short"),
+    )
+    assert await list_public_shorts(db) == []
+
+
+@pytest.mark.asyncio
+async def test_public_shorts_excludes_unlisted(db, org, admin_user, course):
+    await _make_published_video(
+        db, org, admin_user, course, "unlisted1", content_format="short", visibility="unlisted",
+    )
+    assert await list_public_shorts(db) == []
+
+
+@pytest.mark.asyncio
+async def test_public_shorts_excludes_long_form(db, org, admin_user, course):
+    await _make_published_video(db, org, admin_user, course, "long1", content_format="long")
+    assert await list_public_shorts(db) == []
+
+
+@pytest.mark.asyncio
+async def test_public_shorts_spans_multiple_organizations(
+    db, org, other_org, admin_user, other_org_admin_user, course, other_org_course
+):
+    short1 = await _make_published_video(db, org, admin_user, course, "s1", content_format="short")
+    short2 = await _make_published_video(
+        db, other_org, other_org_admin_user, other_org_course, "s2", content_format="short"
+    )
+
+    results = await list_public_shorts(db)
+    assert {v.id for v in results} == {short1.id, short2.id}
+
+
+@pytest.mark.asyncio
+async def test_public_shorts_orders_newest_first(db, org, admin_user, course):
+    s0 = await _make_published_video(db, org, admin_user, course, "s0", content_format="short")
+    s1 = await _make_published_video(db, org, admin_user, course, "s1", content_format="short")
+    s2 = await _make_published_video(db, org, admin_user, course, "s2", content_format="short")
+
+    for i, video_id in enumerate((s0.id, s1.id, s2.id)):
+        row = (await db.execute(select(ChannelVideo).where(ChannelVideo.id == video_id))).scalars().first()
+        row.creation_date = f"2026-01-0{i + 1} 00:00:00.000000"
+        db.add(row)
+    await db.commit()
+
+    results = await list_public_shorts(db)
+    assert [v.id for v in results] == [s2.id, s1.id, s0.id]
+
+
+@pytest.mark.asyncio
+async def test_public_shorts_accessible_with_no_user_argument(db, org, admin_user, course):
+    """list_public_shorts is unconditionally public — it takes no
+    current_user argument at all, proven by calling it with only a db
+    session."""
+    short = await _make_published_video(db, org, admin_user, course, "short1", content_format="short")
+    results = await list_public_shorts(db)
+    assert [v.id for v in results] == [short.id]
+
+
 # ── Get: visibility rules ───────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -437,6 +591,21 @@ async def test_admin_can_update_channel_video_metadata(db, org, admin_user, acti
     )).scalars().first()
     assert row.title == "Updated Title"
     assert row.update_date != row.creation_date
+
+
+@pytest.mark.asyncio
+async def test_admin_can_update_content_format(db, org, admin_user, activity):
+    video = await create_channel_video(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        data=ChannelVideoCreate(activity_id=activity.id, title="Reclassify me"),
+    )
+    assert video.content_format == "long"
+
+    updated = await update_channel_video(
+        request=None, org_id=org.id, channelvideo_id=video.id, current_user=admin_user,
+        db_session=db, data=ChannelVideoUpdate(content_format="short"),
+    )
+    assert updated.content_format == "short"
 
 
 @pytest.mark.asyncio

@@ -68,6 +68,7 @@ async def test_creates_with_defaults_and_educational_metadata(db, org, activity)
     assert video.id is not None
     assert video.published is False
     assert video.visibility == "public"
+    assert video.content_format == "long"
     assert video.description is None
     assert video.thumbnail_image is None
     assert video.subject == "Mathematics"
@@ -78,6 +79,49 @@ async def test_creates_with_defaults_and_educational_metadata(db, org, activity)
     ).scalars().first()
     assert row is not None
     assert row.org_id == org.id
+
+
+@pytest.mark.asyncio
+async def test_content_format_defaults_to_long(db, org, activity):
+    """Phase 3A: `content_format` distinguishes Shorts from long-form video.
+    Every video created without specifying it — including all pre-Phase-3A
+    rows via the migration's server_default — must be treated as long-form."""
+    video = ChannelVideo(
+        channelvideo_uuid="channelvideo_default_format",
+        org_id=org.id,
+        activity_id=activity.id,
+        title="Untouched by Phase 3",
+        creation_date=str(datetime.now()),
+        update_date=str(datetime.now()),
+    )
+    db.add(video)
+    await db.commit()
+    await db.refresh(video)
+
+    assert video.content_format == "long"
+
+
+@pytest.mark.asyncio
+async def test_content_format_short_persists(db, org, activity):
+    video = ChannelVideo(
+        channelvideo_uuid="channelvideo_short",
+        org_id=org.id,
+        activity_id=activity.id,
+        title="A Short",
+        content_format="short",
+        creation_date=str(datetime.now()),
+        update_date=str(datetime.now()),
+    )
+    db.add(video)
+    await db.commit()
+    await db.refresh(video)
+
+    assert video.content_format == "short"
+
+    row = (
+        await db.execute(select(ChannelVideo).where(ChannelVideo.id == video.id))
+    ).scalars().first()
+    assert row.content_format == "short"
 
 
 @pytest.mark.asyncio

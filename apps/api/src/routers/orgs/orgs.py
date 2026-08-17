@@ -1739,7 +1739,8 @@ async def api_create_channel_video(
         "Public/anonymous viewers see published, publicly-visible videos "
         "only. This channel's owner/admins see everything, including drafts "
         "and unlisted posts. Supports filtering by educational metadata and "
-        "sorts newest-first."
+        "by content_format ('long' or 'short'); omitting content_format "
+        "returns both. Sorts newest-first."
     ),
     responses={
         200: {"description": "Channel videos.", "model": List[ChannelVideoRead]},
@@ -1754,6 +1755,7 @@ async def api_list_channel_videos(
     level: Optional[str] = None,
     institution_context: Optional[str] = None,
     resource_type: Optional[str] = None,
+    content_format: Optional[Literal["long", "short"]] = Query(default=None),
     current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> List[ChannelVideoRead]:
@@ -1761,6 +1763,7 @@ async def api_list_channel_videos(
         request, org_id, current_user, db_session,
         subject=subject, topic=topic, level=level,
         institution_context=institution_context, resource_type=resource_type,
+        content_format=content_format,
     )
 
 
