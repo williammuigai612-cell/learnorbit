@@ -12,7 +12,7 @@
 - [x] Original LearnHouse web application opens locally
 
 ## Current Phase
-**Phase 4 — Social Learning** (Phase 1 — Channels, Phase 2 — Educational Video, and Phase 3 — Shorts (3A–3H) are all complete; see below). Phase 4 has not started implementation — the current action is Phase 4 planning/scoping, per `docs/ROADMAP.md`.
+**Phase 4 — Social Learning** (Phase 1 — Channels, Phase 2 — Educational Video, and Phase 3 — Shorts (3A–3H) are all complete; see below). Phase 4 planning/scoping is complete (see `docs/ARCHITECTURE.md` § "Social Engagement (Phase 4A/4B)"); implementation is underway — Phase 4A (engagement schema), Phase 4B (Likes end-to-end), Phase 4C (Comments end-to-end), and Phase 4D (Saves end-to-end) are complete. **Next up: Phase 4E — Shares.**
 
 ## Status Snapshot
 - Phase 1 (1A–1C — Channels): complete
@@ -407,6 +407,195 @@
   Phase 4's engagement systems (likes, comments, saves, shares, view
   counts, notifications, ranking — explicitly out of scope per
   `docs/ARCHITECTURE.md` §8).
+- **Phase 4 planning/scoping: complete** — full architecture/data-model/API/
+  frontend/notification plan produced and broken into increments 4A–4H
+  (a chat-session deliverable, not a committed doc); the schema/service
+  decisions actually implemented are recorded in `docs/ARCHITECTURE.md` §
+  "Social Engagement (Phase 4A/4B)".
+- **Phase 4A (Social Engagement schema): complete** — four new tables,
+  direct FK to `channelvideo.id` (`ondelete="CASCADE"`), no polymorphism:
+  `ChannelVideoLike`, `ChannelVideoSave` (toggle shape, unique per
+  channelvideo+user — mirrors `OrganizationFollow`), `ChannelVideoComment`
+  (flat, no threading/voting — mirrors `DiscussionComment` minus those
+  fields), `ChannelVideoShare` (append-only event log, no uniqueness
+  constraint, required non-nullable `user_id` — no anonymous-identity infra
+  exists in this schema). Migration `d7bab4bd5914` (chained onto
+  `a4286436d85d`), verified upgrade+downgrade+re-upgrade clean against the
+  real local Postgres. No endpoints/services/UI — schema only. 19 new model
+  tests (`test_channel_video_engagement_models.py`) + 7 pre-existing
+  `ChannelVideo` model tests re-run: 26 passed, 0 failed. Ruff (pinned
+  0.15.9) clean.
+- **Phase 4B (Likes end-to-end): complete** — authenticated like/unlike →
+  live count → frontend hook → engagement bar → long-form watch page, for
+  `ChannelVideo` (Shorts wiring intentionally deferred to Phase 4F).
+  - **Backend**: `services/orgs/channel_video_likes.py`
+    (`get_like_status`/`like_channel_video`/`unlike_channel_video`, live
+    `func.count()` — no denormalized counter) + three endpoints on the
+    existing `orgs` router (`GET/POST/DELETE
+    /orgs/{org_id}/videos/{channelvideo_id}/like`), returning a combined
+    `ChannelVideoLikeStatus` (`is_liked`+`like_count`), the same shape as
+    `OrganizationFollowStatus`. Visibility/ownership is not
+    re-implemented: every function calls the existing `get_channel_video`
+    first (published+public → anyone; otherwise this channel's owner/admin
+    only), so a video can only be liked/its status seen by a viewer who
+    could actually watch it. Concurrent duplicate likes handled via
+    `IntegrityError` → idempotent success, mirroring `follow_organization`.
+  - **Tests (TDD)**: 14 new service tests
+    (`test_channel_video_likes_service.py` — duplicate prevention,
+    idempotent unlike, live count correctness incl. a DB-direct-insert
+    check that bypasses the service, per-user isolation, anonymous/401/403
+    rules, owner-can-like-own-draft, cross-org rejection) + 6 new router
+    tests (`TestChannelVideoLikeEndpoints` appended to
+    `test_orgs_router.py`, mirroring `TestOrgFollowEndpoints`). Full
+    regression run (router + channel-videos service + likes service +
+    follows service + both model test files): **148 passed, 0 failed.**
+    Ruff (pinned 0.15.9) clean on all changed backend files.
+  - **Frontend**: `hooks/queries/useChannelVideoEngagement.ts`
+    (`useChannelVideoLikeStatus`/`useLikeChannelVideo`/
+    `useUnlikeChannelVideo`, mirrors `useOrgFollowStatus`/`useFollowOrg`/
+    `useUnfollowOrg`) + `queryKeys.channelVideos.like(orgId, id)`; three
+    new fetchers in `services/organizations/channelVideos.ts`. New
+    `components/Objects/Channel/ChannelVideoEngagementBar.tsx` (like-only
+    for 4B; built as a row so Save/Comment/Share can be added as siblings
+    later without a redesign — no placeholder controls rendered for them).
+    Mounted in `video.tsx` directly below `ChannelRow`, per
+    `docs/DESIGN_SYSTEM.md` §15's documented engagement-row placement.
+    `bun test tests`: 112 passed, 12 failed, 1 error — identical to the
+    documented pre-existing baseline (billing-internal-key,
+    catalog-pagination missing fixture, ar.json timeout); no new failures.
+    `lint:strict` (eslint) clean on all changed/new frontend files.
+  - **Known limitations**: `tsc --noEmit` remains blocked repo-wide by the
+    pre-existing `tsconfig.json` `baseUrl` deprecation issue logged since
+    Phase 2G-3 (confirmed still present; `tsconfig.json` itself untouched).
+    Live browser verification not possible — same app-wide Next.js
+    `[dynamicSegment]/(routeGroup)/page.tsx` 404 regression logged since
+    Phase 3F (`/orgs/[orgslug]/(withmenu)/*`, including the watch page this
+    mounts on, is unreachable in this local dev server); verified via
+    backend tests + lint only, per the same standing limitation already
+    accepted for Phase 3F/3G/3H.
+  - **Deferred (per task scope)**: Saves, Comments, Shares, Notifications,
+    Shorts engagement rail (4F), card-level engagement counts, engagement
+    batching, denormalized counters, comment moderation, threaded replies.
+- **Phase 4C (Comments end-to-end): complete** — authenticated
+  create/list/edit-own/delete-own → engagement bar → long-form watch page,
+  for `ChannelVideo` (Shorts wiring intentionally deferred to Phase 4F, same
+  as 4B).
+  - **Backend**: `services/orgs/channel_video_comments.py`
+    (`create_channel_video_comment`/`list_channel_video_comments`/
+    `update_channel_video_comment`/`delete_channel_video_comment`) + four
+    endpoints on the existing `orgs` router (`GET/POST
+    /orgs/{org_id}/videos/{channelvideo_id}/comments`, `PUT/DELETE
+    .../comments/{comment_uuid}`), returning `ChannelVideoCommentRead`
+    (nested `UserReadAuthor`, same shape as `DiscussionCommentReadWithAuthor`
+    minus vote status). Visibility for create/list is not re-implemented:
+    both call the existing `get_channel_video` first (published+public →
+    anyone; otherwise this channel's owner/admin only). Edit/delete are
+    author-only (403 otherwise) — no channel-admin moderation override in
+    this phase; a comment's `channelvideo_id` is checked against the URL's
+    on edit/delete (404 on mismatch), same defense as the like service's
+    cross-org-id test. Validation is a single hard-coded
+    `MAX_COMMENT_LENGTH = 2000` plus a non-empty-after-strip check — no
+    configurable per-org moderation (`services/communities/moderation.py`'s
+    `validate_comment_content` confirmed non-reusable, per
+    `docs/ARCHITECTURE.md`). List is newest-first (`creation_date.desc()`),
+    a deliberate deviation from `DiscussionComment`'s ascending order for a
+    video comments panel's UX, not a copy error.
+  - **Tests (TDD)**: 22 new service tests
+    (`test_channel_video_comments_service.py` — create/list/update/delete
+    happy paths, empty/over-length content rejection, anonymous/401/403
+    rules, owner-can-comment-on-own-draft, cross-org and
+    cross-channelvideo-id rejection, list ordering/limit) + 8 new router
+    tests (`TestChannelVideoCommentEndpoints` appended to
+    `test_orgs_router.py`, mirroring `TestChannelVideoLikeEndpoints`).
+    Scoped regression (router + channel-videos service + comments service +
+    likes service + both model test files, matching Phase 4B's verification
+    scope exactly): **168 passed, 0 failed.** Full backend suite also run:
+    **5381 passed, 10 failed, 29 skipped** — the 10 failures are pre-existing
+    and unrelated (`test_custom_domains_service.py`,
+    `test_org_invites_service.py`, `test_podcasts_service.py`,
+    `test_core_events*.py`; none touch orgs/channel-video/comment/like code).
+    Ruff (pinned 0.15.9) clean on all changed backend files.
+  - **Frontend**: `hooks/queries/useChannelVideoEngagement.ts` gains
+    `useChannelVideoComments`/`useCreateChannelVideoComment`/
+    `useUpdateChannelVideoComment`/`useDeleteChannelVideoComment` (same
+    status-query + `setQueryData`-on-success shape as the Like hooks) +
+    `queryKeys.channelVideos.comments(orgId, id)`; four new fetchers in
+    `services/organizations/channelVideos.ts`. No pagination UI — the list
+    is fetched once with `limit=100`, mirroring the existing
+    `CommentSection.tsx` (community discussions) precedent exactly. New
+    `components/Objects/Channel/ChannelVideoCommentsPanel.tsx`: a
+    self-contained `Dialog`-based trigger+panel (no `Sheet` primitive exists
+    in this codebase) showing the comment count, list, and composer;
+    mounted as one line inside `ChannelVideoEngagementBar.tsx` alongside the
+    existing Like button, no changes to `video.tsx` itself (the bar already
+    receives `orgId`/`channelVideoId`). `lint:strict` (eslint) clean on all
+    changed/new frontend files (one pre-existing-pattern unused-arg warning
+    self-fixed with a `_` prefix before commit).
+  - **Known limitations**: same two standing, pre-existing environment
+    issues as Phase 4B — `tsc --noEmit` blocked repo-wide by the
+    `tsconfig.json` `baseUrl` deprecation issue, and live browser
+    verification blocked by the app-wide Next.js
+    `[dynamicSegment]/(routeGroup)/page.tsx` 404 regression
+    (`/orgs/[orgslug]/(withmenu)/*`, including the watch page this mounts
+    on). Verified via backend tests + lint only, same accepted standard as
+    3F/3G/3H/4B.
+  - **Deliberately not built (per explicit task scope)**: threaded replies,
+    comment likes/upvotes, configurable moderation settings, notifications,
+    ranking, ChannelVideoCommentsPanel-external pagination, card-level
+    comment counts, channel-admin "delete any comment" moderation (only
+    author-delete is in scope — flagged as a possible future gap, not
+    implemented).
+- **Phase 4D (Saves end-to-end): complete** — authenticated save/unsave →
+  engagement bar, for `ChannelVideo` (Shorts wiring intentionally deferred to
+  Phase 4F, same as 4B/4C). Mirrors 4B's `ChannelVideoLike` pattern exactly,
+  per the Phase 4A schema decision that a save is the same (channelvideo,
+  user) toggle shape as a like, just with no public count.
+  - **Backend**: `services/orgs/channel_video_saves.py`
+    (`get_save_status`/`save_channel_video`/`unsave_channel_video`,
+    returning `ChannelVideoSaveStatus{is_saved}` — no `save_count`, since a
+    save is a private per-user bookmark, not a public metric) + three
+    endpoints on the existing `orgs` router (`GET/POST/DELETE
+    /orgs/{org_id}/videos/{channelvideo_id}/save`). Visibility/ownership not
+    re-implemented: every function calls the existing `get_channel_video`
+    first (published+public → anyone; otherwise this channel's owner/admin
+    only), identical to the like service. `get_save_status` supports
+    anonymous viewers of a public video (`is_saved` always `false`), matching
+    `get_like_status`'s behavior for API-shape consistency even though
+    anonymous save state is trivially always-false. The `ChannelVideoSave`
+    table itself already existed from the Phase 4A migration
+    (`d7bab4bd5914_add_channel_video_engagement_tables`) — no new migration
+    needed for this increment.
+  - **Tests (TDD)**: 12 new service tests
+    (`test_channel_video_saves_service.py` — save/unsave happy paths,
+    idempotency, per-user isolation, anonymous/401/403 rules,
+    owner-can-save-own-draft, cross-org rejection) + 7 new router tests
+    (`TestChannelVideoSaveEndpoints` appended to `test_orgs_router.py`,
+    mirroring `TestChannelVideoLikeEndpoints`). Scoped regression (router +
+    saves service + likes service + comments service + engagement model
+    tests, matching Phase 4B/4C's verification scope): **145 passed, 0
+    failed.** Ruff (pinned 0.15.9) clean on all changed backend files (an
+    unpinned newer ruff surfaced unrelated style findings — import order,
+    `Union`→`|`, `datetime.UTC` — that are pre-existing in the mirrored
+    `channel_video_likes.py` too; confirmed clean at the CI-pinned version).
+  - **Frontend**: `hooks/queries/useChannelVideoEngagement.ts` gains
+    `useChannelVideoSaveStatus`/`useSaveChannelVideo`/`useUnsaveChannelVideo`
+    (same status-query + `setQueryData`-on-success shape as the Like hooks)
+    + `queryKeys.channelVideos.save(orgId, id)`; three new fetchers in
+    `services/organizations/channelVideos.ts`. `ChannelVideoEngagementBar.tsx`
+    gains a bookmark-icon toggle button next to Like, authenticated-only (no
+    anonymous read-only fallback, since there's no public count to show).
+    `lint:strict` (eslint) clean on all changed/new frontend files.
+  - **Known limitations**: same two standing, pre-existing environment
+    issues as Phase 4B/4C — `tsc --noEmit` blocked repo-wide by the
+    `tsconfig.json` `baseUrl` deprecation issue, and live browser
+    verification blocked by the app-wide Next.js
+    `[dynamicSegment]/(routeGroup)/page.tsx` 404 regression. Verified via
+    backend tests + lint only, same accepted standard as 4B/4C.
+  - **Deliberately not built (per explicit task scope)**: a "my saved
+    videos" listing page/endpoint (only the per-video toggle is in scope
+    this increment — listing would need a new `GET
+    /orgs/{org_id}/videos/saved` or similar and its own UI, not implied by
+    "Saves end-to-end" as scoped here), save counts, Shorts wiring.
 
 ## Current Task
 Phase 2 (2A–2G-3) is functionally complete for V1 scope; 2G-4 (thumbnail
@@ -419,10 +608,17 @@ now complete.** Outstanding, non-blocking items: subject/topic/level
 filtering for the Shorts channel section (deferred within 3G, see above),
 and the app-wide Next.js dynamic-segment/route-group routing bug logged
 under Phase 3F, which blocks live browser verification for `/orgs/*` pages
-(including 3H's changes) until fixed in a dedicated task. **Current task:
-Phase 4 — Social Learning planning/scoping** (`docs/ROADMAP.md`) — Phase 4
-implementation has not started; scoping (data model, endpoints, UI surfaces
-for likes/comments/saves/shares/notifications) comes before any code.
+(including 3H's changes) until fixed in a dedicated task. Phase 4
+planning/scoping is complete; Phase 4A (engagement schema), Phase 4B
+(Likes end-to-end), Phase 4C (Comments end-to-end), and Phase 4D (Saves
+end-to-end) are complete — see the Status Snapshot entries above and
+`docs/ARCHITECTURE.md` § "Social Engagement (Phase 4A/4B/4C)". The same
+Next.js routing bug above also blocks live browser verification of
+4B's/4C's/4D's frontend (verified via backend tests + lint only). **Next
+task: Phase 4E — Shares** (append-only event log, not a toggle — see
+`docs/ARCHITECTURE.md`'s Phase 4A schema decision for `ChannelVideoShare`'s
+shape, which already differs from the Like/Save pattern: no uniqueness
+constraint, repeated shares are all valid counted events).
 
 ## Completed Product Features
 - **Phase 1A — Channel Foundation**: `Organization` extended with a
@@ -844,11 +1040,16 @@ Separate from the product-phase track above; sequenced per `docs/UI_UX_IMPLEMENT
    is now complete.** Outstanding, non-blocking from 3G: subject/topic/level
    filtering for the channel Shorts section (deferred, not required for
    3G's core requirement).
-6. **Next: Phase 4 — Social Learning planning/scoping** (`docs/ROADMAP.md`)
-   — begin by scoping the data model, endpoints, and UI surfaces for likes,
-   comments, saves, sharing, and basic notifications before writing any
-   implementation code, per root `CLAUDE.md`'s `PLAN → IMPLEMENT → TEST →
-   REVIEW → COMMIT` workflow.
+6. Phase 4 planning/scoping, Phase 4A (engagement schema), Phase 4B
+   (Likes end-to-end), Phase 4C (Comments end-to-end), and Phase 4D (Saves
+   end-to-end) are complete — see the Status Snapshot entries above and
+   `docs/ARCHITECTURE.md` § "Social Engagement (Phase 4A/4B/4C)". **Next:
+   Phase 4E — Shares** (`services/orgs/channel_video_shares.py` + a
+   record-share endpoint, but NOT a toggle — `ChannelVideoShare` has no
+   uniqueness constraint, so this is an append-only event log, closer in
+   shape to a "record this event" POST than 4B/4D's like/unlike pair; see
+   the Phase 4A schema decision), per root `CLAUDE.md`'s `PLAN → IMPLEMENT →
+   TEST → REVIEW → COMMIT` workflow.
 7. **Blocking, app-wide local-dev bug to fix before any further live browser
    verification**: Next.js 16.2.9 in this environment 404s every route
    shaped `[dynamicSegment]/(routeGroup)/page.tsx` — which is exactly

@@ -48,6 +48,27 @@ from src.services.orgs.channel_videos import (
     set_channel_video_published,
     update_channel_video,
 )
+from src.services.orgs.channel_video_likes import (
+    ChannelVideoLikeStatus,
+    get_like_status,
+    like_channel_video,
+    unlike_channel_video,
+)
+from src.services.orgs.channel_video_saves import (
+    ChannelVideoSaveStatus,
+    get_save_status,
+    save_channel_video,
+    unsave_channel_video,
+)
+from src.services.orgs.channel_video_comments import (
+    ChannelVideoCommentCreate,
+    ChannelVideoCommentRead,
+    ChannelVideoCommentUpdate,
+    create_channel_video_comment,
+    delete_channel_video_comment,
+    list_channel_video_comments,
+    update_channel_video_comment,
+)
 from src.services.orgs.orgs import (
     create_org,
     create_org_with_config,
@@ -1873,6 +1894,278 @@ async def api_delete_channel_video(
 ):
     await delete_channel_video(request, org_id, channelvideo_id, current_user, db_session)
     return {"detail": "Channel video removed"}
+
+
+# Channel video likes (LearnOrbit Phase 4B) — a lightweight (channelvideo,
+# user) toggle with a live count. See docs/ARCHITECTURE.md § "Social
+# Engagement (Phase 4A/4B)".
+@router.get(
+    "/{org_id}/videos/{channelvideo_id}/like",
+    response_model=ChannelVideoLikeStatus,
+    summary="Get like status for a channel video",
+    description=(
+        "Return whether the current user has liked this video and the total "
+        "like count. Supports anonymous viewers (is_liked is always false "
+        "for them). Follows the same published+public visibility rule as "
+        "GET /{org_id}/videos/{channelvideo_id}."
+    ),
+    responses={
+        200: {"description": "Like status and like count.", "model": ChannelVideoLikeStatus},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_get_channel_video_like_status(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoLikeStatus:
+    return await get_like_status(request, org_id, channelvideo_id, current_user, db_session)
+
+
+@router.post(
+    "/{org_id}/videos/{channelvideo_id}/like",
+    response_model=ChannelVideoLikeStatus,
+    summary="Like a channel video",
+    description=(
+        "Like the video as the authenticated user. Idempotent — liking an "
+        "already-liked video is a no-op. Only possible for a video this "
+        "viewer could actually watch (same visibility rule as the watch page)."
+    ),
+    responses={
+        200: {"description": "Video is now liked.", "model": ChannelVideoLikeStatus},
+        401: {"description": "Not authenticated"},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_like_channel_video(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoLikeStatus:
+    return await like_channel_video(request, org_id, channelvideo_id, current_user, db_session)
+
+
+@router.delete(
+    "/{org_id}/videos/{channelvideo_id}/like",
+    response_model=ChannelVideoLikeStatus,
+    summary="Unlike a channel video",
+    description=(
+        "Unlike the video as the authenticated user. Idempotent — unliking "
+        "a video you haven't liked is a no-op."
+    ),
+    responses={
+        200: {"description": "Video is no longer liked.", "model": ChannelVideoLikeStatus},
+        401: {"description": "Not authenticated"},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_unlike_channel_video(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoLikeStatus:
+    return await unlike_channel_video(request, org_id, channelvideo_id, current_user, db_session)
+
+
+# Channel video saves (LearnOrbit Phase 4D) — a private per-user (channelvideo,
+# user) toggle, no public count. See docs/ARCHITECTURE.md § "Social
+# Engagement (Phase 4A/4B)".
+@router.get(
+    "/{org_id}/videos/{channelvideo_id}/save",
+    response_model=ChannelVideoSaveStatus,
+    summary="Get save status for a channel video",
+    description=(
+        "Return whether the current user has saved this video. Supports "
+        "anonymous viewers (is_saved is always false for them). Follows the "
+        "same published+public visibility rule as GET "
+        "/{org_id}/videos/{channelvideo_id}."
+    ),
+    responses={
+        200: {"description": "Save status.", "model": ChannelVideoSaveStatus},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_get_channel_video_save_status(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoSaveStatus:
+    return await get_save_status(request, org_id, channelvideo_id, current_user, db_session)
+
+
+@router.post(
+    "/{org_id}/videos/{channelvideo_id}/save",
+    response_model=ChannelVideoSaveStatus,
+    summary="Save a channel video",
+    description=(
+        "Save the video as the authenticated user. Idempotent — saving an "
+        "already-saved video is a no-op. Only possible for a video this "
+        "viewer could actually watch (same visibility rule as the watch page)."
+    ),
+    responses={
+        200: {"description": "Video is now saved.", "model": ChannelVideoSaveStatus},
+        401: {"description": "Not authenticated"},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_save_channel_video(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoSaveStatus:
+    return await save_channel_video(request, org_id, channelvideo_id, current_user, db_session)
+
+
+@router.delete(
+    "/{org_id}/videos/{channelvideo_id}/save",
+    response_model=ChannelVideoSaveStatus,
+    summary="Unsave a channel video",
+    description=(
+        "Unsave the video as the authenticated user. Idempotent — unsaving "
+        "a video you haven't saved is a no-op."
+    ),
+    responses={
+        200: {"description": "Video is no longer saved.", "model": ChannelVideoSaveStatus},
+        401: {"description": "Not authenticated"},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_unsave_channel_video(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoSaveStatus:
+    return await unsave_channel_video(request, org_id, channelvideo_id, current_user, db_session)
+
+
+# Channel video comments (LearnOrbit Phase 4C) — flat comments (no threading,
+# no voting), hard-coded max length, author-only edit/delete. See
+# docs/ARCHITECTURE.md § "Social Engagement (Phase 4A/4B)".
+@router.get(
+    "/{org_id}/videos/{channelvideo_id}/comments",
+    response_model=list[ChannelVideoCommentRead],
+    summary="List comments on a channel video",
+    description=(
+        "Newest-first, paginated. Follows the same published+public "
+        "visibility rule as GET /{org_id}/videos/{channelvideo_id}."
+    ),
+    responses={
+        200: {"description": "Comments.", "model": list[ChannelVideoCommentRead]},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_list_channel_video_comments(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    page: int = 1,
+    limit: int = 50,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> list[ChannelVideoCommentRead]:
+    return await list_channel_video_comments(
+        request, org_id, channelvideo_id, current_user, db_session, page, limit
+    )
+
+
+@router.post(
+    "/{org_id}/videos/{channelvideo_id}/comments",
+    response_model=ChannelVideoCommentRead,
+    summary="Comment on a channel video",
+    description=(
+        "Create a comment as the authenticated user. Only possible for a "
+        "video this viewer could actually watch (same visibility rule as "
+        "the watch page)."
+    ),
+    responses={
+        200: {"description": "Created comment.", "model": ChannelVideoCommentRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+        422: {"description": "Comment is empty or too long"},
+    },
+)
+async def api_create_channel_video_comment(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    data: ChannelVideoCommentCreate,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoCommentRead:
+    return await create_channel_video_comment(
+        request, org_id, channelvideo_id, data.content, current_user, db_session
+    )
+
+
+@router.put(
+    "/{org_id}/videos/{channelvideo_id}/comments/{comment_uuid}",
+    response_model=ChannelVideoCommentRead,
+    summary="Edit a comment on a channel video",
+    description="Comment author only.",
+    responses={
+        200: {"description": "Updated comment.", "model": ChannelVideoCommentRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this comment's author"},
+        404: {"description": "Comment not found"},
+        422: {"description": "Comment is empty or too long"},
+    },
+)
+async def api_update_channel_video_comment(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    comment_uuid: str,
+    data: ChannelVideoCommentUpdate,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoCommentRead:
+    return await update_channel_video_comment(
+        request, org_id, channelvideo_id, comment_uuid, data.content, current_user, db_session
+    )
+
+
+@router.delete(
+    "/{org_id}/videos/{channelvideo_id}/comments/{comment_uuid}",
+    summary="Delete a comment on a channel video",
+    description="Comment author only.",
+    responses={
+        200: {"description": "Comment deleted."},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this comment's author"},
+        404: {"description": "Comment not found"},
+    },
+)
+async def api_delete_channel_video_comment(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    comment_uuid: str,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    return await delete_channel_video_comment(
+        request, org_id, channelvideo_id, comment_uuid, current_user, db_session
+    )
 
 
 # Include the feature config sub-router (admin-only endpoints)

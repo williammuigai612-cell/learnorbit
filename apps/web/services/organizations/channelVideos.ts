@@ -128,3 +128,174 @@ export async function setChannelVideoPublished(
   )
   return errorHandling(result)
 }
+
+export interface ChannelVideoLikeStatus {
+  is_liked: boolean
+  like_count: number
+}
+
+/** Like status + live count (Phase 4B). Supports anonymous viewers of a
+ * public video (is_liked is always false for them) — same visibility rule
+ * as getChannelVideo. */
+export async function getChannelVideoLikeStatus(
+  org_id: number,
+  channelvideo_id: number | string,
+  access_token?: string
+): Promise<ChannelVideoLikeStatus> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/like`,
+    RequestBodyWithAuthHeader('GET', null, null, access_token)
+  )
+  return errorHandling(result)
+}
+
+/** Like the video as the authenticated user (Phase 4B, idempotent). */
+export async function likeChannelVideo(
+  org_id: number,
+  channelvideo_id: number | string,
+  access_token: string
+): Promise<ChannelVideoLikeStatus> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/like`,
+    RequestBodyWithAuthHeader('POST', null, null, access_token)
+  )
+  return errorHandling(result)
+}
+
+/** Unlike the video as the authenticated user (Phase 4B, idempotent). */
+export async function unlikeChannelVideo(
+  org_id: number,
+  channelvideo_id: number | string,
+  access_token: string
+): Promise<ChannelVideoLikeStatus> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/like`,
+    RequestBodyWithAuthHeader('DELETE', null, null, access_token)
+  )
+  return errorHandling(result)
+}
+
+export interface ChannelVideoSaveStatus {
+  is_saved: boolean
+}
+
+/** Save status (Phase 4D). Supports anonymous viewers of a public video
+ * (is_saved is always false for them) — same visibility rule as
+ * getChannelVideo. Unlike likes, there is no public count: saves are a
+ * private per-user bookmark. */
+export async function getChannelVideoSaveStatus(
+  org_id: number,
+  channelvideo_id: number | string,
+  access_token?: string
+): Promise<ChannelVideoSaveStatus> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/save`,
+    RequestBodyWithAuthHeader('GET', null, null, access_token)
+  )
+  return errorHandling(result)
+}
+
+/** Save the video as the authenticated user (Phase 4D, idempotent). */
+export async function saveChannelVideo(
+  org_id: number,
+  channelvideo_id: number | string,
+  access_token: string
+): Promise<ChannelVideoSaveStatus> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/save`,
+    RequestBodyWithAuthHeader('POST', null, null, access_token)
+  )
+  return errorHandling(result)
+}
+
+/** Unsave the video as the authenticated user (Phase 4D, idempotent). */
+export async function unsaveChannelVideo(
+  org_id: number,
+  channelvideo_id: number | string,
+  access_token: string
+): Promise<ChannelVideoSaveStatus> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/save`,
+    RequestBodyWithAuthHeader('DELETE', null, null, access_token)
+  )
+  return errorHandling(result)
+}
+
+/** Minimal author projection — mirrors the API's UserReadAuthor. */
+export interface ChannelVideoCommentAuthor {
+  id: number
+  user_uuid: string
+  username: string
+  first_name: string
+  last_name: string
+  avatar_image?: string
+}
+
+export interface ChannelVideoComment {
+  id: number
+  channelvideo_id: number
+  content: string
+  comment_uuid: string
+  creation_date: string
+  update_date: string
+  author: ChannelVideoCommentAuthor | null
+}
+
+/** Newest-first comments (Phase 4C). Supports anonymous viewers of a public
+ * video — same visibility rule as getChannelVideo. No pagination UI on the
+ * frontend: fetched once with a generous limit, matching the existing
+ * community CommentSection precedent (getComments(uuid, 1, 100, ...)). */
+export async function listChannelVideoComments(
+  org_id: number,
+  channelvideo_id: number | string,
+  access_token?: string
+): Promise<ChannelVideoComment[]> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/comments?page=1&limit=100`,
+    RequestBodyWithAuthHeader('GET', null, null, access_token)
+  )
+  return errorHandling(result)
+}
+
+/** Create a comment as the authenticated user (Phase 4C). */
+export async function createChannelVideoComment(
+  org_id: number,
+  channelvideo_id: number | string,
+  content: string,
+  access_token: string
+): Promise<ChannelVideoComment> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/comments`,
+    RequestBodyWithAuthHeader('POST', { content }, null, access_token)
+  )
+  return errorHandling(result)
+}
+
+/** Edit a comment as its author (Phase 4C). */
+export async function updateChannelVideoComment(
+  org_id: number,
+  channelvideo_id: number | string,
+  comment_uuid: string,
+  content: string,
+  access_token: string
+): Promise<ChannelVideoComment> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/comments/${comment_uuid}`,
+    RequestBodyWithAuthHeader('PUT', { content }, null, access_token)
+  )
+  return errorHandling(result)
+}
+
+/** Delete a comment as its author (Phase 4C). */
+export async function deleteChannelVideoComment(
+  org_id: number,
+  channelvideo_id: number | string,
+  comment_uuid: string,
+  access_token: string
+): Promise<{ detail: string }> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/comments/${comment_uuid}`,
+    RequestBodyWithAuthHeader('DELETE', null, null, access_token)
+  )
+  return errorHandling(result)
+}

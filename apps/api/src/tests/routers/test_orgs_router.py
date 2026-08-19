@@ -9,6 +9,9 @@ from httpx import ASGITransport, AsyncClient
 from src.core.events.database import get_db_session
 from src.db.organizations import OrganizationRead
 from src.db.organization_follows import OrganizationFollowStatus
+from src.services.orgs.channel_video_likes import ChannelVideoLikeStatus
+from src.services.orgs.channel_video_saves import ChannelVideoSaveStatus
+from src.services.orgs.channel_video_comments import ChannelVideoCommentRead
 from src.routers.orgs.orgs import router as orgs_router
 from src.security.auth import get_authenticated_user, get_current_user
 from src.security.features_utils.dependencies import require_org_admin
@@ -613,3 +616,285 @@ class TestOrgFollowEndpoints:
 
         assert response.status_code == 200
         assert response.json() == {"is_following": False, "follower_count": 3}
+
+
+class TestChannelVideoLikeEndpoints:
+    """Router wiring for Phase 4B — mirrors TestOrgFollowEndpoints exactly:
+    mocked service calls verify route/method/response-shape, while the
+    401/403 cases exercise the real service so the auth/visibility guard
+    itself is proven, not just its mocked stand-in."""
+
+    async def test_get_like_status(self, client):
+        with patch(
+            "src.routers.orgs.orgs.get_like_status",
+            new_callable=AsyncMock,
+            return_value=ChannelVideoLikeStatus(is_liked=True, like_count=5),
+        ):
+            response = await client.get("/api/v1/orgs/1/videos/1/like")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_liked": True, "like_count": 5}
+
+    async def test_like_channel_video(self, client):
+        with patch(
+            "src.routers.orgs.orgs.like_channel_video",
+            new_callable=AsyncMock,
+            return_value=ChannelVideoLikeStatus(is_liked=True, like_count=1),
+        ) as like_mock:
+            response = await client.post("/api/v1/orgs/1/videos/1/like")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_liked": True, "like_count": 1}
+        like_mock.assert_awaited_once()
+
+    async def test_unlike_channel_video(self, client):
+        with patch(
+            "src.routers.orgs.orgs.unlike_channel_video",
+            new_callable=AsyncMock,
+            return_value=ChannelVideoLikeStatus(is_liked=False, like_count=0),
+        ) as unlike_mock:
+            response = await client.delete("/api/v1/orgs/1/videos/1/like")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_liked": False, "like_count": 0}
+        unlike_mock.assert_awaited_once()
+
+    async def test_like_requires_authentication(self, app, anonymous_user):
+        # Not mocking like_channel_video: the real service raises 401 for an
+        # AnonymousUser before touching the database, same pattern as
+        # test_follow_org_requires_authentication above.
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.post("/api/v1/orgs/1/videos/1/like")
+
+        assert response.status_code == 401
+
+    async def test_unlike_requires_authentication(self, app, anonymous_user):
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.delete("/api/v1/orgs/1/videos/1/like")
+
+        assert response.status_code == 401
+
+    async def test_get_like_status_allows_anonymous(self, app, anonymous_user):
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        with patch(
+            "src.routers.orgs.orgs.get_like_status",
+            new_callable=AsyncMock,
+            return_value=ChannelVideoLikeStatus(is_liked=False, like_count=2),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as anon_client:
+                response = await anon_client.get("/api/v1/orgs/1/videos/1/like")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_liked": False, "like_count": 2}
+
+
+class TestChannelVideoSaveEndpoints:
+    """Router wiring for Phase 4D — mirrors TestChannelVideoLikeEndpoints:
+    mocked service calls verify route/method/response-shape, while the
+    401/403 cases exercise the real service so the auth/visibility guard
+    itself is proven, not just its mocked stand-in."""
+
+    async def test_get_save_status(self, client):
+        with patch(
+            "src.routers.orgs.orgs.get_save_status",
+            new_callable=AsyncMock,
+            return_value=ChannelVideoSaveStatus(is_saved=True),
+        ):
+            response = await client.get("/api/v1/orgs/1/videos/1/save")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_saved": True}
+
+    async def test_save_channel_video(self, client):
+        with patch(
+            "src.routers.orgs.orgs.save_channel_video",
+            new_callable=AsyncMock,
+            return_value=ChannelVideoSaveStatus(is_saved=True),
+        ) as save_mock:
+            response = await client.post("/api/v1/orgs/1/videos/1/save")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_saved": True}
+        save_mock.assert_awaited_once()
+
+    async def test_unsave_channel_video(self, client):
+        with patch(
+            "src.routers.orgs.orgs.unsave_channel_video",
+            new_callable=AsyncMock,
+            return_value=ChannelVideoSaveStatus(is_saved=False),
+        ) as unsave_mock:
+            response = await client.delete("/api/v1/orgs/1/videos/1/save")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_saved": False}
+        unsave_mock.assert_awaited_once()
+
+    async def test_save_requires_authentication(self, app, anonymous_user):
+        # Not mocking save_channel_video: the real service raises 401 for an
+        # AnonymousUser before touching the database, same pattern as
+        # test_like_requires_authentication above.
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.post("/api/v1/orgs/1/videos/1/save")
+
+        assert response.status_code == 401
+
+    async def test_unsave_requires_authentication(self, app, anonymous_user):
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.delete("/api/v1/orgs/1/videos/1/save")
+
+        assert response.status_code == 401
+
+    async def test_get_save_status_allows_anonymous(self, app, anonymous_user):
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        with patch(
+            "src.routers.orgs.orgs.get_save_status",
+            new_callable=AsyncMock,
+            return_value=ChannelVideoSaveStatus(is_saved=False),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as anon_client:
+                response = await anon_client.get("/api/v1/orgs/1/videos/1/save")
+
+        assert response.status_code == 200
+        assert response.json() == {"is_saved": False}
+
+
+class TestChannelVideoCommentEndpoints:
+    """Router wiring for Phase 4C — mirrors TestChannelVideoLikeEndpoints:
+    mocked service calls verify route/method/response-shape, while the
+    401 cases exercise the real service so the auth guard itself is proven,
+    not just its mocked stand-in."""
+
+    def _comment(self, **overrides):
+        data = dict(
+            id=1,
+            channelvideo_id=1,
+            content="Great video!",
+            comment_uuid="channelvideocomment_1",
+            creation_date="2026-08-19 00:00:00",
+            update_date="2026-08-19 00:00:00",
+            author=None,
+        )
+        data.update(overrides)
+        return ChannelVideoCommentRead(**data)
+
+    async def test_list_comments(self, client):
+        with patch(
+            "src.routers.orgs.orgs.list_channel_video_comments",
+            new_callable=AsyncMock,
+            return_value=[self._comment()],
+        ):
+            response = await client.get("/api/v1/orgs/1/videos/1/comments")
+
+        assert response.status_code == 200
+        assert response.json() == [self._comment().model_dump()]
+
+    async def test_create_comment(self, client):
+        with patch(
+            "src.routers.orgs.orgs.create_channel_video_comment",
+            new_callable=AsyncMock,
+            return_value=self._comment(),
+        ) as create_mock:
+            response = await client.post(
+                "/api/v1/orgs/1/videos/1/comments", json={"content": "Great video!"}
+            )
+
+        assert response.status_code == 200
+        assert response.json() == self._comment().model_dump()
+        create_mock.assert_awaited_once()
+
+    async def test_update_comment(self, client):
+        with patch(
+            "src.routers.orgs.orgs.update_channel_video_comment",
+            new_callable=AsyncMock,
+            return_value=self._comment(content="Edited"),
+        ) as update_mock:
+            response = await client.put(
+                "/api/v1/orgs/1/videos/1/comments/channelvideocomment_1",
+                json={"content": "Edited"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["content"] == "Edited"
+        update_mock.assert_awaited_once()
+
+    async def test_delete_comment(self, client):
+        with patch(
+            "src.routers.orgs.orgs.delete_channel_video_comment",
+            new_callable=AsyncMock,
+            return_value={"detail": "Comment deleted"},
+        ) as delete_mock:
+            response = await client.delete(
+                "/api/v1/orgs/1/videos/1/comments/channelvideocomment_1"
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"detail": "Comment deleted"}
+        delete_mock.assert_awaited_once()
+
+    async def test_create_comment_requires_authentication(self, app, anonymous_user):
+        # Not mocking create_channel_video_comment: the real service raises
+        # 401 for an AnonymousUser before touching the database, same
+        # pattern as test_like_requires_authentication above.
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.post(
+                "/api/v1/orgs/1/videos/1/comments", json={"content": "Hello"}
+            )
+
+        assert response.status_code == 401
+
+    async def test_update_comment_requires_authentication(self, app, anonymous_user):
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.put(
+                "/api/v1/orgs/1/videos/1/comments/channelvideocomment_1",
+                json={"content": "Hello"},
+            )
+
+        assert response.status_code == 401
+
+    async def test_delete_comment_requires_authentication(self, app, anonymous_user):
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.delete(
+                "/api/v1/orgs/1/videos/1/comments/channelvideocomment_1"
+            )
+
+        assert response.status_code == 401
+
+    async def test_list_comments_allows_anonymous(self, app, anonymous_user):
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        with patch(
+            "src.routers.orgs.orgs.list_channel_video_comments",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as anon_client:
+                response = await anon_client.get("/api/v1/orgs/1/videos/1/comments")
+
+        assert response.status_code == 200
+        assert response.json() == []

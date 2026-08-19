@@ -16,6 +16,7 @@ import {
 } from '@/hooks/queries/useChannelVideo'
 import { Badge } from '@components/ui/badge'
 import { Button } from '@components/ui/button'
+import { ChannelVideoEngagementBar } from '@components/Objects/Channel/ChannelVideoEngagementBar'
 
 const VideoActivity = lazy(() => import('@components/Objects/Activities/Video/Video'))
 
@@ -301,6 +302,8 @@ function VideoWatchContent({ orgslug, channelvideoid }: VideoWatchClientProps) {
         </div>
 
         <ChannelRow org={org} orgslug={orgslug} />
+
+        <ChannelVideoEngagementBar orgId={org?.id} channelVideoId={channelVideo.id} />
 
         {channelVideo.description && (
           <p className="text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">

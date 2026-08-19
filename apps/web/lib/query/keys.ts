@@ -42,6 +42,15 @@ export const queryKeys = {
       filters && Object.keys(filters).length > 0
         ? (['channelVideo', orgId, 'list', filters] as const)
         : (['channelVideo', orgId, 'list'] as const),
+    // Phase 4B
+    like: (orgId: number, channelVideoId: number | string) =>
+      ['channelVideo', orgId, channelVideoId, 'like'] as const,
+    // Phase 4D
+    save: (orgId: number, channelVideoId: number | string) =>
+      ['channelVideo', orgId, channelVideoId, 'save'] as const,
+    // Phase 4C
+    comments: (orgId: number, channelVideoId: number | string) =>
+      ['channelVideo', orgId, channelVideoId, 'comments'] as const,
   },
   trail: {
     org: (orgId: number) => ['trail', 'org', orgId] as const,
