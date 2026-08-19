@@ -8,7 +8,7 @@ from src.routers import health
 from src.routers import instance
 from src.routers import plans
 from src.routers import usergroups
-from src.routers import dev, trail, users, auth, orgs, roles, search, shorts
+from src.routers import dev, trail, users, auth, orgs, roles, search, shorts, feed, notifications
 from src.routers import mfa as mfa_router_module
 from src.routers import monitoring
 from src.routers import nudges as nudges_router_module
@@ -207,6 +207,8 @@ v1_router.include_router(
 )
 v1_router.include_router(search.router, prefix="/search", tags=["search"])
 v1_router.include_router(shorts.router, prefix="/shorts", tags=["shorts"])
+v1_router.include_router(feed.router, prefix="/feed", tags=["feed"])
+v1_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 v1_router.include_router(
     assignments.router,
     prefix="/assignments",

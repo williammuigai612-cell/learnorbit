@@ -303,7 +303,7 @@ function VideoWatchContent({ orgslug, channelvideoid }: VideoWatchClientProps) {
 
         <ChannelRow org={org} orgslug={orgslug} />
 
-        <ChannelVideoEngagementBar orgId={org?.id} channelVideoId={channelVideo.id} />
+        <ChannelVideoEngagementBar orgId={org?.id} channelVideoId={channelVideo.id} orgslug={orgslug} />
 
         {channelVideo.description && (
           <p className="text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">

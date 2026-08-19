@@ -12,7 +12,7 @@
 - [x] Original LearnHouse web application opens locally
 
 ## Current Phase
-**Phase 4 — Social Learning** (Phase 1 — Channels, Phase 2 — Educational Video, and Phase 3 — Shorts (3A–3H) are all complete; see below). Phase 4 planning/scoping is complete (see `docs/ARCHITECTURE.md` § "Social Engagement (Phase 4A/4B)"); implementation is underway — Phase 4A (engagement schema), Phase 4B (Likes end-to-end), Phase 4C (Comments end-to-end), and Phase 4D (Saves end-to-end) are complete. **Next up: Phase 4E — Shares.**
+**Phase 4 — Social Learning** (Phase 1 — Channels, Phase 2 — Educational Video, and Phase 3 — Shorts (3A–3H) are all complete; see below). Phase 4 planning/scoping is complete (see `docs/ARCHITECTURE.md` § "Social Engagement (Phase 4A/4B/4C/4E/4F)", § "Home Feed (Phase 4G)", and § "Basic Notifications (Phase 4H)"); Phase 4A (engagement schema), Phase 4B (Likes end-to-end), Phase 4C (Comments end-to-end), Phase 4D (Saves end-to-end), Phase 4E (Shares end-to-end), Phase 4F (Shorts engagement rail), Phase 4G (Home feed), and Phase 4H (Basic notifications) are complete. **Every `docs/ROADMAP.md` Phase 4 item is now done — Phase 4 is complete.** Next: move on to the next `docs/ROADMAP.md` milestone (Phase 5 — Academic Library).
 
 ## Status Snapshot
 - **Infrastructure fix (2026-08-19): both repo-wide dev-environment blockers
@@ -615,6 +615,238 @@
     this increment — listing would need a new `GET
     /orgs/{org_id}/videos/saved` or similar and its own UI, not implied by
     "Saves end-to-end" as scoped here), save counts, Shorts wiring.
+- **Phase 4E (Shares end-to-end): complete** — authenticated share → live
+  count → engagement bar, for `ChannelVideo` (Shorts wiring intentionally
+  deferred to Phase 4F, same as 4B/4C/4D). Unlike Like/Save, `ChannelVideoShare`
+  is an append-only event log per the Phase 4A schema decision: no
+  uniqueness constraint, no unshare, repeated shares by the same user are
+  all valid and all counted.
+  - **Backend**: `services/orgs/channel_video_shares.py`
+    (`get_share_status`/`share_channel_video`, live `func.count()` — no
+    denormalized counter, same as likes) + two endpoints on the existing
+    `orgs` router (`GET/POST /orgs/{org_id}/videos/{channelvideo_id}/share`).
+    No DELETE endpoint — there is nothing to undo for an event log.
+    `share_channel_video` unconditionally inserts a new row and commits on
+    every call (no idempotency/`IntegrityError` guard, unlike
+    like/save — there is no unique constraint to violate). Visibility/
+    ownership not re-implemented: reuses the existing `get_channel_video`
+    first, identical to the like/save/comment services.
+  - **Tests (TDD)**: 9 new service tests
+    (`test_channel_video_shares_service.py` — event creation, cumulative
+    count across repeated shares by the same user, count shared publicly
+    across users, anonymous/401/403 rules, owner-can-share-own-draft,
+    cross-org rejection) + 4 new router tests
+    (`TestChannelVideoShareEndpoints` appended to `test_orgs_router.py`,
+    mirroring `TestChannelVideoLikeEndpoints` minus the DELETE case).
+    Scoped regression (router + channel-videos service + likes + saves +
+    comments + shares services + engagement/channel-video model tests,
+    matching Phase 4B/4C/4D's verification scope): **199 passed, 0
+    failed.** Ruff (pinned 0.15.9, via `uvx ruff@0.15.9` — the local `uv`
+    environment has no ruff installed directly) clean on all changed
+    backend files.
+  - **Frontend**: `hooks/queries/useChannelVideoEngagement.ts` gains
+    `useChannelVideoShareStatus`/`useShareChannelVideo` (status-query +
+    single mutation, no "un-" counterpart) + `queryKeys.channelVideos.share
+    (orgId, id)`; two new fetchers in `services/organizations/channelVideos.ts`.
+    `ChannelVideoEngagementBar.tsx` gains a Share button (icon + public
+    count, same anonymous-vs-authenticated display split as Like) that
+    gained an `orgslug` prop (now also passed from `video.tsx`) purely to
+    build the copied link — clicking it records the share event and copies
+    the video's absolute URL to the clipboard via `navigator.clipboard
+    .writeText`, reusing the existing `new URL(path, window.location.origin)`
+    resolution pattern from `CourseShare.tsx` and the try/catch clipboard
+    pattern from `ActivityShareDropdown.tsx`, rather than inventing new
+    logic. No social-platform share-target dropdown (LinkedIn/X/WhatsApp/
+    Reddit) was added — out of scope for this wiring increment, see
+    `docs/ARCHITECTURE.md`. `lint:strict` (eslint) clean on all changed/new
+    frontend files (one `no-console` warning in the clipboard catch block
+    self-fixed by dropping the log, since the failure is already
+    non-fatal).
+  - **Verification beyond the standing baseline**: the two repo-wide
+    dev-environment blockers (`tsconfig.json` `baseUrl`, the Next.js
+    `[dynamicSegment]/(routeGroup)/page.tsx` 404) were fixed just before this
+    phase (see the Status Snapshot entry above) — `tsc --noEmit` now runs
+    clean (confirmed for this phase's changes), and `bun test tests`: 112
+    passed, 12 failed, 1 error, matching the documented pre-existing
+    baseline exactly (`billing-internal-key.test.mjs`,
+    `catalog-pagination.test.mjs`'s missing fixture, the `ar.json` coverage
+    timeout) — no regressions, no new frontend test file added (no fetcher
+    test file exists for the Like/Save fetchers either, so none was invented
+    here to stay consistent). Live in-browser verification of the Share
+    button itself was **not** performed this session (no dev server was
+    started); the routing fix means it's newly possible as a follow-up,
+    unlike 4B/4C/4D which were structurally blocked.
+  - **Deliberately not built (per explicit task scope)**: social-platform
+    share targets, Shorts wiring, view/impression tracking beyond the share
+    event itself, a "who shared this" listing.
+- **Phase 4F (Shorts engagement rail): complete** — Like/Comment/Save/Share
+  now live on the Shorts viewer (`short.tsx`), reusing Phase 4A–4E's
+  hooks/endpoints unchanged (no backend/schema work). `docs/DESIGN_SYSTEM.md`
+  §16 requires a vertical icon+count rail (`--foreground`-on-scrim, overlaid
+  on mobile, alongside-not-overlaid on desktop) — visually incompatible with
+  the existing light horizontal bar built for the watch page, so rather than
+  forking the engagement logic into a Shorts-only component,
+  `ChannelVideoEngagementBar` gained a `layout?: 'horizontal' | 'rail'` prop
+  (default `'horizontal'`; watch page usage unchanged) and
+  `ChannelVideoCommentsPanel` gained an optional `trigger` render-prop so the
+  rail can supply its own icon+count Dialog trigger. See
+  `docs/ARCHITECTURE.md` § "Social Engagement (Phase 4A/4B/4C/4E/4F)" for the
+  full decision record.
+  - **Frontend only**: `short.tsx` mounts the rail twice, mirroring the
+    file's existing dual-markup convention for breakpoint-specific controls
+    (same pattern as its up/down nav buttons) — absolutely positioned inside
+    `.short-viewer-frame` for mobile (`sm:hidden`, scrolls with its own
+    slide, same technique as `ShortAttributionOverlay`), and a
+    `hidden sm:flex` column beside the frame for desktop.
+  - **Verification**: ESLint (`lint:strict`) clean on all three changed
+    files. `tsc --noEmit` clean project-wide. `bun test tests`: 112 passed,
+    12 failed, 1 error — matching the documented pre-existing baseline
+    exactly (same three known failures as 4E), no regressions. No new
+    component tests added (this repo's frontend suite is service/logic-level
+    only, no component-render harness — consistent with 4B–4E).
+  - **Live browser verification**: performed against the real dev stack
+    (`npx learnhouse dev`, Postgres/Redis already running). No seeded Short
+    existed locally, so an existing published long-form `ChannelVideo`
+    (id 1, a real working YouTube-backed Activity) was temporarily flipped
+    to `content_format='short'` via direct DB update to reach the Shorts
+    viewer, then reverted to `'long'` immediately after — a temporary,
+    reversible QA fixture, not a schema or seed-data change. Confirmed at
+    desktop width (1400px): rail renders alongside the frame (not overlaid)
+    with correct Like/Comment/Share icon+count styling and contrast: Comment
+    trigger opens the same `ChannelVideoCommentsPanel` Dialog correctly
+    (`RailCommentTrigger`'s forwardRef/asChild wiring confirmed working); the
+    long-form watch page (`/videos/1`) was re-checked after reverting the
+    fixture and its horizontal bar is unchanged. **Not verified live**: the
+    mobile overlay placement — this environment's `resize_window` tool does
+    not actually shrink the rendered viewport (same pre-existing tool
+    limitation already logged for UI-1's mobile bottom tab bar), so the
+    `sm:hidden` mobile rail was code-reviewed only, not pixel-verified.
+  - **Pre-existing, unrelated**: a Radix `DialogContent` missing-Description
+    console warning on the Comments dialog — present before this phase
+    (`ChannelVideoCommentsPanel`'s `DialogContent` was not modified), not a
+    regression from this change.
+- **Phase 4G (Home feed): complete** — the roadmap's "Home feed" item.
+  Reverse-chronological, long-form-only feed of videos from channels the
+  authenticated user follows, reusing `ChannelVideoCard`'s `channel` prop
+  (added in Phase 2G-2 in anticipation of exactly this) rather than
+  introducing a new card component. See
+  `docs/ARCHITECTURE.md` § "Home Feed (Phase 4G)" for the full decision
+  record (cross-org query over `OrganizationFollow`, why Shorts are
+  excluded, the 401-for-anonymous convention, and the nav-cap tradeoff).
+  - **Backend**: `list_home_feed` (new, `services/orgs/channel_videos.py`)
+    joins `ChannelVideo`→`Organization` filtered to the caller's followed
+    org ids; `GET /feed` (new router, `routers/feed.py`, mounted in
+    `router.py`). 401 for anonymous, `[]` for a user following nobody.
+  - **Frontend**: new route `app/orgs/(withmenu)/[orgslug]/feed/` (`page.tsx`
+    + `feed-client.tsx`), `services/organizations/feed.ts`,
+    `hooks/queries/useHomeFeed.ts`, a `feed.home` query key. "Home" added as
+    a second fixed, global nav destination (same pattern as Shorts) in
+    `OrgSidebar.tsx`/`OrgBottomTabBar.tsx`; the mobile tab bar's
+    config-driven `MAX_TABS` dropped `3 → 2` to hold the documented 4–5
+    top-level-destination cap with two fixed tabs now.
+  - **Verification**: backend — 8 new service tests + 1 new router test
+    (`test_home_feed_*`, `test_home_feed_rejects_anonymous_caller`), all
+    passing; ruff clean (pinned 0.15.9); full suite
+    `TESTING=true uv run pytest src/tests/`: **5420 passed, 29 skipped, 11
+    failed** — all 11 failures pre-existing and unrelated (EE hooks, custom
+    domains, org invites, podcasts service), none touch orgs/follows/
+    channel_videos/feed. Frontend — ESLint (`lint:strict`) clean, `tsc
+    --noEmit` clean project-wide, `bun test tests`: 112 passed, 12 failed, 1
+    error — the same documented pre-existing baseline as 4E/4F, no
+    regressions.
+  - **Live browser verification**: performed against the real dev stack
+    (already running: web:3000, api:1338, Postgres/Redis). Confirmed
+    unauthenticated: "Home" nav renders first (both sidebar and, implicitly,
+    the mobile tab bar via the same fixed-entry code path) and is
+    highlighted active on `/feed`; the signed-out empty state ("Sign in to
+    see your feed") renders correctly. Confirmed authenticated end-to-end
+    using a temporary QA account (created via signup, email-verified via a
+    direct DB update since local dev has no SMTP configured — `smtp_host: ""`
+    in `config.yaml` — a temporary, reversible fixture, deleted after use,
+    same pattern as 4F's temporary content_format flip): followed the
+    default org via its existing Follow button, then `/feed` correctly
+    rendered both of that channel's published long-form videos as
+    `ChannelVideoCard`s with the channel attribution badge, subject/topic
+    chips, and relative published date; clicking a card navigated correctly
+    to its `/videos/{id}` watch page with a working player. No console
+    errors on either page. **Not verified live**: a true cross-org
+    click-through (this environment's single-tenancy dev collapse means
+    only one real org exists locally, so the accepted "card links use the
+    page's own orgslug, not the item's" limitation — same as Shorts — could
+    not be exercised against a second distinct org); the mobile nav layout
+    (same pre-existing `resize_window` limitation logged for UI-1/4F).
+- **Phase 4H (Basic notifications): complete** — the roadmap's last Phase 4
+  item. In-app notifications created when a user comments on another user's
+  `ChannelVideo`, no self-notification when the video's own admin comments
+  on it. See `docs/ARCHITECTURE.md` § "Basic Notifications (Phase 4H)" for
+  the full decision record (recipient resolution via existing org-admin
+  role checks, the best-effort call-site pattern reused from
+  `_try_record_org_admin_in_loops`, and the minimal endpoint/UI surface).
+  - **Backend**: new `notification` table/model (`db/notifications.py`,
+    migration `f9a1b2c3d4e5`) — single-purpose FKs to `user`
+    (recipient/actor) and `channelvideo`, plain-string `notification_type`
+    (`"COMMENT"` today, extensible to `LIKE` later without a migration).
+    `services/notifications/notifications.py`: `create_comment_notifications`
+    (notifies the video's org admin(s)/maintainer(s) except the actor),
+    `list_notifications`, `get_unread_notification_count`,
+    `mark_notification_read`, `mark_all_notifications_read` — all
+    recipient-scoped, 401 for anonymous, 404 (not 403) for a
+    non-recipient's `notification_uuid`. New global router
+    `routers/notifications.py` (`GET /notifications`,
+    `GET /notifications/unread-count`, `PATCH /notifications/{uuid}/read`,
+    `PATCH /notifications/read-all`), mounted in `router.py` under
+    `/notifications`, same unscoped-router pattern as `routers/feed.py`.
+    Best-effort integration: `create_channel_video_comment`
+    (`services/orgs/channel_video_comments.py`) now builds its response
+    *before* calling `_try_create_comment_notifications` (try/except +
+    `logging.exception` + `db_session.rollback()` on failure), so a
+    notification-layer exception can never break comment creation and
+    can't leave a stale/expired ORM instance in the returned response.
+  - **Frontend**: `services/organizations/notifications.ts` (fetchers),
+    `hooks/queries/useNotifications.ts` (`useNotifications`,
+    `useUnreadNotificationCount` — 60s `refetchInterval`,
+    `useMarkNotificationRead`, `useMarkAllNotificationsRead`), a
+    `notifications` query-key group in `lib/query/keys.ts`. New
+    `components/Objects/Menus/NotificationBell.tsx`: a bell icon + unread
+    badge + `DropdownMenu` list (actor avatar, "commented on your video",
+    relative time, unread dot, "mark all read"), reusing `OrgMenu.tsx`'s
+    existing `CopilotMenuButton` dropdown pattern rather than a new nav
+    destination or page — matches `docs/UI_UX_IMPLEMENTATION_PLAN.md`
+    UI-7's "simple list/indicator, not a full real-time system." Wired into
+    `OrgMenu.tsx` in both the desktop header row (`hidden md:flex`,
+    authenticated-only) and the existing mobile hamburger panel (alongside
+    `HeaderProfileBox`), so no new mobile surface was added.
+  - **Tests (TDD: RED confirmed before each GREEN)**: 12 new service tests
+    (`test_notifications_service.py`) + 3 new integration tests appended to
+    `test_channel_video_comments_service.py` (notification-on-comment,
+    no-self-notification, comment survives a monkeypatched notification
+    failure) + 8 new router tests (`test_notifications_router.py`,
+    anonymous-401 and cross-user 404/scoping cases) — **23 new tests, all
+    passing**. Full backend suite
+    (`TESTING=true uv run pytest src/tests/`): **5443 passed, 29 skipped,
+    11 failed** — the same 11 pre-existing, unrelated failures as 4G's
+    documented baseline (EE hooks, custom domains, org invites, podcasts
+    service), +23 vs. 4G's 5420 passed, confirming no regressions. Ruff
+    (pinned 0.15.9 via `uvx ruff@0.15.9`) clean on every new/changed
+    backend file. Frontend: ESLint (`lint:strict`) clean on every
+    new/changed frontend file (the repo-wide run surfaces ~751 pre-existing
+    problems in unrelated files, none touching this change); `tsc --noEmit`
+    clean project-wide; `bun test tests`: 112 passed, 12 failed, 1 error —
+    the same documented pre-existing baseline as 4E–4G, no regressions.
+    `git diff --check`: clean (CRLF-normalization notices only, no actual
+    whitespace errors).
+  - **Live browser verification**: **not performed.** This environment's
+    dev stack was not started for this increment (no live `npx learnhouse
+    dev` session was running), so the bell's rendering, dropdown behavior,
+    and mark-read interaction were code-reviewed against existing working
+    patterns (`CopilotMenuButton`, `ChannelVideoCommentsPanel`) but not
+    pixel/interaction-verified in a real browser. This is a real gap, not
+    the previously-logged `resize_window`/routing limitations.
+  - **Known limitations / deferred**: LIKE notifications (type column
+    supports it, no call site added — out of scope per the task); email
+    notifications, push notifications, notification preferences, threaded
+    notifications (all explicitly out of scope); card-level engagement
+    counts and comment moderation (already deferred since 4E/4F, unchanged).
 
 ## Current Task
 Phase 2 (2A–2G-3) is functionally complete for V1 scope; 2G-4 (thumbnail
@@ -629,15 +861,25 @@ and the app-wide Next.js dynamic-segment/route-group routing bug logged
 under Phase 3F, which blocks live browser verification for `/orgs/*` pages
 (including 3H's changes) until fixed in a dedicated task. Phase 4
 planning/scoping is complete; Phase 4A (engagement schema), Phase 4B
-(Likes end-to-end), Phase 4C (Comments end-to-end), and Phase 4D (Saves
-end-to-end) are complete — see the Status Snapshot entries above and
-`docs/ARCHITECTURE.md` § "Social Engagement (Phase 4A/4B/4C)". The same
-Next.js routing bug above also blocks live browser verification of
-4B's/4C's/4D's frontend (verified via backend tests + lint only). **Next
-task: Phase 4E — Shares** (append-only event log, not a toggle — see
-`docs/ARCHITECTURE.md`'s Phase 4A schema decision for `ChannelVideoShare`'s
-shape, which already differs from the Like/Save pattern: no uniqueness
-constraint, repeated shares are all valid counted events).
+(Likes end-to-end), Phase 4C (Comments end-to-end), Phase 4D (Saves
+end-to-end), Phase 4E (Shares end-to-end), and Phase 4F (Shorts engagement
+rail), and 4G (Home feed) are all complete — see the Status Snapshot entries
+above, `docs/ARCHITECTURE.md` § "Social Engagement (Phase 4A/4B/4C/4E/4F)",
+and § "Home Feed (Phase 4G)". 4F was live-verified against the real dev
+stack at desktop width (rail placement, styling, and the Comments Dialog
+trigger all confirmed working); the mobile overlay placement is
+code-reviewed only, not pixel-verified, due to this environment's
+pre-existing `resize_window` limitation (same one already logged for UI-1).
+4G was live-verified end-to-end including authenticated feed content (see
+its Status Snapshot entry for the temporary QA-account fixture used). Phase
+4H (Basic notifications) is now also complete — see its Status Snapshot
+entry below and `docs/ARCHITECTURE.md` § "Basic Notifications (Phase 4H)".
+**Every `docs/ROADMAP.md` Phase 4 item is now checked off; Phase 4 is
+complete.** (`docs/ROADMAP.md`'s Likes/Comments/Saves/Sharing boxes had
+drifted out of sync with this file's prior "complete" claims for 4B–4E —
+found during 4H, since fixed: all five Phase 4 boxes now accurately reflect
+4B–4H's completed status.) The next task is moving to the next
+`docs/ROADMAP.md` milestone (Phase 5 — Academic Library).
 
 ## Completed Product Features
 - **Phase 1A — Channel Foundation**: `Organization` extended with a
@@ -1059,16 +1301,15 @@ Separate from the product-phase track above; sequenced per `docs/UI_UX_IMPLEMENT
    is now complete.** Outstanding, non-blocking from 3G: subject/topic/level
    filtering for the channel Shorts section (deferred, not required for
    3G's core requirement).
-6. Phase 4 planning/scoping, Phase 4A (engagement schema), Phase 4B
-   (Likes end-to-end), Phase 4C (Comments end-to-end), and Phase 4D (Saves
-   end-to-end) are complete — see the Status Snapshot entries above and
-   `docs/ARCHITECTURE.md` § "Social Engagement (Phase 4A/4B/4C)". **Next:
-   Phase 4E — Shares** (`services/orgs/channel_video_shares.py` + a
-   record-share endpoint, but NOT a toggle — `ChannelVideoShare` has no
-   uniqueness constraint, so this is an append-only event log, closer in
-   shape to a "record this event" POST than 4B/4D's like/unlike pair; see
-   the Phase 4A schema decision), per root `CLAUDE.md`'s `PLAN → IMPLEMENT →
-   TEST → REVIEW → COMMIT` workflow.
+6. Phase 4A–4G (engagement schema, Likes, Comments, Saves, Shares, Shorts
+   engagement rail, Home feed) are all complete — see the Status Snapshot
+   entries above, `docs/ARCHITECTURE.md` § "Social Engagement (Phase
+   4A/4B/4C/4E/4F)", and § "Home Feed (Phase 4G)". **Every `docs/ROADMAP.md`
+   Phase 4 item except "Basic notifications" is done.** Next is either
+   scoping Basic notifications, further Phase 4 polish (deferred items:
+   card-level counts, comment moderation, social-platform share targets), or
+   the next `docs/ROADMAP.md` milestone (Phase 5 — Academic Library); needs a
+   scoping decision before starting.
 7. **RESOLVED (2026-08-19)** — the Next.js `[dynamicSegment]/(routeGroup)/page.tsx`
    404 (was: every org-scoped page unreachable in the local dev server) and
    the `tsconfig.json` `baseUrl` deprecation blocking `tsc --noEmit` are both
@@ -1078,3 +1319,13 @@ Separate from the product-phase track above; sequenced per `docs/UI_UX_IMPLEMENT
    work; re-verifying prior phases' previously-unverified UI (3F, 3G, 3H,
    UI-1's mobile viewport, 4B, 4C, 4D) live is optional follow-up, not done
    as part of this fix.
+8. Phase 4F was live-verified at desktop width only (see Status Snapshot
+   entry above) — the `sm:hidden` mobile overlay rail in `short.tsx` is
+   code-reviewed but not pixel-verified, same pre-existing `resize_window`
+   viewport limitation already logged for UI-1's mobile bottom tab bar.
+   Re-verifying it (and UI-1's mobile nav) on a real mobile viewport is
+   optional follow-up whenever that tooling gap is resolved.
+9. Commit the uncommitted Phase 4B–4F changes currently sitting in the
+   working tree (git status at session start showed all of 4E/4F as
+   uncommitted) — not done automatically per `CLAUDE.md`'s git rules; only
+   on explicit request.

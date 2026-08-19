@@ -20,6 +20,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.db.channel_videos import ChannelVideo
 from src.db.courses.activities import Activity, ActivityTypeEnum
+from src.db.organization_follows import OrganizationFollow
 from src.db.organizations import Organization
 from src.db.users import AnonymousUser, PublicUser
 from src.security.auth import resolve_acting_user_id
@@ -80,6 +81,22 @@ class ChannelVideoRead(SQLModel):
     level: Optional[str] = None
     institution_context: Optional[str] = None
     resource_type: Optional[str] = None
+
+
+class HomeFeedItem(ChannelVideoRead):
+    """A ChannelVideoRead plus the owning channel's attribution fields.
+
+    Needed here (and not on ChannelVideoRead itself) because the home feed is
+    the first surface where a video card is shown outside its own channel's
+    page — every other listing already has channel context from the
+    surrounding page (ChannelHeader), so ChannelVideoRead never needed to
+    carry it. See docs/UI_UX_IMPLEMENTATION_PLAN.md UI-5 "video listing/grid
+    components reused across channel and home surfaces" and
+    ChannelVideoCard's `channel` prop, added in anticipation of this.
+    """
+    org_slug: str
+    org_name: str
+    channel_type: str
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +277,53 @@ async def list_public_shorts(db_session: AsyncSession) -> list[ChannelVideoRead]
     )
     rows = (await db_session.execute(statement)).scalars().all()
     return [ChannelVideoRead.model_validate(r) for r in rows]
+
+
+async def list_home_feed(
+    current_user: PublicUser | AnonymousUser, db_session: AsyncSession
+) -> list[HomeFeedItem]:
+    """Reverse-chronological feed of long-form videos from channels the
+    authenticated user follows (Phase 4G / roadmap "Home feed").
+
+    Deliberately long-form only: Shorts already have their own global
+    discovery entry point (list_public_shorts / GET /shorts) and a distinct
+    swipe interaction model per docs/UI_UX_IMPLEMENTATION_PLAN.md UI-6 ("should
+    not reuse the long-form video page layout") — mixing them into this grid
+    would duplicate that surface, not extend it. No ranking/algorithm per
+    PRD §5 — same published+public predicate and newest-first ordering as
+    list_channel_videos/list_public_shorts.
+    """
+    if isinstance(current_user, AnonymousUser):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    acting_user_id = resolve_acting_user_id(current_user)
+
+    followed_org_ids = (await db_session.execute(
+        select(OrganizationFollow.org_id).where(OrganizationFollow.user_id == acting_user_id)
+    )).scalars().all()
+    if not followed_org_ids:
+        return []
+
+    statement = (
+        select(ChannelVideo, Organization)
+        .join(Organization, Organization.id == ChannelVideo.org_id)
+        .where(
+            ChannelVideo.org_id.in_(followed_org_ids),
+            ChannelVideo.content_format == "long",
+            ChannelVideo.published == True,  # noqa: E712
+            ChannelVideo.visibility == "public",
+        )
+        .order_by(ChannelVideo.creation_date.desc())
+    )
+    rows = (await db_session.execute(statement)).all()
+    return [
+        HomeFeedItem(
+            **ChannelVideoRead.model_validate(video).model_dump(),
+            org_slug=organization.slug,
+            org_name=organization.name,
+            channel_type=organization.channel_type,
+        )
+        for video, organization in rows
+    ]
 
 
 async def get_channel_video(

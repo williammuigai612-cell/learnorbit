@@ -28,10 +28,12 @@ from src.services.orgs.channel_videos import (
     delete_channel_video,
     get_channel_video,
     list_channel_videos,
+    list_home_feed,
     list_public_shorts,
     set_channel_video_published,
     update_channel_video,
 )
+from src.services.orgs.follows import follow_organization
 
 # db, org, other_org, admin_user, regular_user, anonymous_user, course, chapter
 # are provided by conftest.py as async fixtures backed by an async SQLite engine.
@@ -742,3 +744,90 @@ async def test_admin_of_another_org_cannot_manage_this_channels_video(
         select(ChannelVideo).where(ChannelVideo.id == video.id)
     )).scalars().first()
     assert row is not None
+
+
+# ── Home feed: list_home_feed (Phase 4G) ────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_home_feed_requires_authentication(db, anonymous_user):
+    with pytest.raises(HTTPException) as exc:
+        await list_home_feed(anonymous_user, db)
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_home_feed_empty_when_following_nobody(db, regular_user):
+    assert await list_home_feed(regular_user, db) == []
+
+
+@pytest.mark.asyncio
+async def test_home_feed_returns_only_followed_channels_videos(
+    db, org, other_org, admin_user, other_org_admin_user, regular_user, course, other_org_course
+):
+    await follow_organization(request=None, org_id=org.id, current_user=regular_user, db_session=db)
+
+    followed_video = await _make_published_video(db, org, admin_user, course, "followed1")
+    await _make_published_video(
+        db, other_org, other_org_admin_user, other_org_course, "notfollowed1"
+    )
+
+    results = await list_home_feed(regular_user, db)
+    assert [v.id for v in results] == [followed_video.id]
+    assert results[0].org_slug == org.slug
+    assert results[0].org_name == org.name
+    assert results[0].channel_type == org.channel_type
+
+
+@pytest.mark.asyncio
+async def test_home_feed_excludes_unpublished(db, org, admin_user, regular_user, activity):
+    await follow_organization(request=None, org_id=org.id, current_user=regular_user, db_session=db)
+    await create_channel_video(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        data=ChannelVideoCreate(activity_id=activity.id, title="Draft"),
+    )
+    assert await list_home_feed(regular_user, db) == []
+
+
+@pytest.mark.asyncio
+async def test_home_feed_excludes_unlisted(db, org, admin_user, regular_user, course):
+    await follow_organization(request=None, org_id=org.id, current_user=regular_user, db_session=db)
+    await _make_published_video(db, org, admin_user, course, "unlisted1", visibility="unlisted")
+    assert await list_home_feed(regular_user, db) == []
+
+
+@pytest.mark.asyncio
+async def test_home_feed_excludes_shorts(db, org, admin_user, regular_user, course):
+    await follow_organization(request=None, org_id=org.id, current_user=regular_user, db_session=db)
+    await _make_published_video(db, org, admin_user, course, "short1", content_format="short")
+    assert await list_home_feed(regular_user, db) == []
+
+
+@pytest.mark.asyncio
+async def test_home_feed_orders_newest_first(db, org, admin_user, regular_user, course):
+    await follow_organization(request=None, org_id=org.id, current_user=regular_user, db_session=db)
+    v0 = await _make_published_video(db, org, admin_user, course, "v0")
+    v1 = await _make_published_video(db, org, admin_user, course, "v1")
+    v2 = await _make_published_video(db, org, admin_user, course, "v2")
+
+    for i, video_id in enumerate((v0.id, v1.id, v2.id)):
+        row = (await db.execute(select(ChannelVideo).where(ChannelVideo.id == video_id))).scalars().first()
+        row.creation_date = f"2026-01-0{i + 1} 00:00:00.000000"
+        db.add(row)
+    await db.commit()
+
+    results = await list_home_feed(regular_user, db)
+    assert [v.id for v in results] == [v2.id, v1.id, v0.id]
+
+
+@pytest.mark.asyncio
+async def test_home_feed_spans_multiple_followed_channels(
+    db, org, other_org, admin_user, other_org_admin_user, regular_user, course, other_org_course
+):
+    await follow_organization(request=None, org_id=org.id, current_user=regular_user, db_session=db)
+    await follow_organization(request=None, org_id=other_org.id, current_user=regular_user, db_session=db)
+
+    v1 = await _make_published_video(db, org, admin_user, course, "v1")
+    v2 = await _make_published_video(db, other_org, other_org_admin_user, other_org_course, "v2")
+
+    results = await list_home_feed(regular_user, db)
+    assert {v.id for v in results} == {v1.id, v2.id}

@@ -17,6 +17,7 @@ Edit/delete authorization is author-only (no channel-admin override) — Phase
 other people's comments is not part of this phase.
 """
 
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional, Union
 from uuid import uuid4
@@ -28,6 +29,7 @@ from fastapi import HTTPException, Request
 from src.db.channel_video_comments import ChannelVideoComment
 from src.db.users import AnonymousUser, PublicUser, User, UserReadAuthor
 from src.security.auth import resolve_acting_user_id
+from src.services.notifications.notifications import create_comment_notifications
 from src.services.orgs.channel_videos import get_channel_video
 
 MAX_COMMENT_LENGTH = 2000
@@ -90,6 +92,20 @@ async def _to_read(comment: ChannelVideoComment, db_session: AsyncSession) -> Ch
     )
 
 
+async def _try_create_comment_notifications(
+    org_id: int, channelvideo_id: int, actor_id: int, db_session: AsyncSession
+) -> None:
+    """Best-effort: notify the video's admin(s) of the new comment. Never
+    fails comment creation — mirrors `_try_record_org_admin_in_loops`
+    (services/orgs/orgs.py). See docs/ARCHITECTURE.md § "Basic Notifications
+    (Phase 4H)"."""
+    try:
+        await create_comment_notifications(org_id, channelvideo_id, actor_id, db_session)
+    except Exception:
+        logging.exception("create_comment_notifications failed")
+        await db_session.rollback()
+
+
 async def create_channel_video_comment(
     request: Request,
     org_id: int,
@@ -117,7 +133,15 @@ async def create_channel_video_comment(
     await db_session.commit()
     await db_session.refresh(comment)
 
-    return await _to_read(comment, db_session)
+    # Read the response before firing the best-effort notification: a
+    # notification failure can roll back db_session (expiring ORM
+    # instances), so anything the response needs from `comment` must be
+    # extracted first.
+    result = await _to_read(comment, db_session)
+
+    await _try_create_comment_notifications(org_id, channelvideo_id, acting_user_id, db_session)
+
+    return result
 
 
 async def list_channel_video_comments(

@@ -5,7 +5,8 @@ Exercises the service functions directly (matches the style of
 test_channel_video_likes_service.py): authenticated create/list/update/delete,
 ownership enforcement, content validation, and reuse of the existing
 ChannelVideo visibility rule (a video's comments can only be created/read by a
-viewer who could actually watch it).
+viewer who could actually watch it). Also covers the Phase 4H best-effort
+notification call site added to `create_channel_video_comment`.
 """
 
 from datetime import datetime
@@ -16,6 +17,7 @@ from sqlmodel import select
 
 from src.db.channel_video_comments import ChannelVideoComment
 from src.db.courses.activities import Activity, ActivitySubTypeEnum, ActivityTypeEnum
+from src.db.notifications import Notification
 from src.services.orgs.channel_videos import (
     ChannelVideoCreate,
     ChannelVideoPublish,
@@ -416,3 +418,63 @@ async def test_delete_comment_rejects_missing_comment(db, org, regular_user, pub
             comment_uuid="does_not_exist", current_user=regular_user, db_session=db,
         )
     assert exc.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Notification integration (Phase 4H)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_comment_creates_notification_for_video_owner(
+    db, org, admin_user, regular_user, published_video
+):
+    await create_channel_video_comment(
+        request=None, org_id=org.id, channelvideo_id=published_video.id,
+        content="Nice video!", current_user=regular_user, db_session=db,
+    )
+
+    rows = (
+        await db.execute(select(Notification).where(Notification.channelvideo_id == published_video.id))
+    ).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].recipient_id == admin_user.id
+    assert rows[0].actor_id == regular_user.id
+    assert rows[0].notification_type == "COMMENT"
+
+
+@pytest.mark.asyncio
+async def test_owner_commenting_on_own_video_creates_no_notification(
+    db, org, admin_user, published_video
+):
+    await create_channel_video_comment(
+        request=None, org_id=org.id, channelvideo_id=published_video.id,
+        content="Note to self", current_user=admin_user, db_session=db,
+    )
+
+    rows = (
+        await db.execute(select(Notification).where(Notification.channelvideo_id == published_video.id))
+    ).scalars().all()
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_comment_creation_survives_notification_failure(
+    db, org, regular_user, published_video, monkeypatch
+):
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("notification backend exploded")
+
+    monkeypatch.setattr(
+        "src.services.orgs.channel_video_comments.create_comment_notifications", _boom
+    )
+
+    comment = await create_channel_video_comment(
+        request=None, org_id=org.id, channelvideo_id=published_video.id,
+        content="Still works", current_user=regular_user, db_session=db,
+    )
+
+    assert comment.content == "Still works"
+    row = (
+        await db.execute(select(ChannelVideoComment).where(ChannelVideoComment.channelvideo_id == published_video.id))
+    ).scalars().first()
+    assert row is not None

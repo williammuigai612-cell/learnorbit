@@ -15,6 +15,7 @@ import {
 } from '@/hooks/queries/useChannelVideo'
 import { useShortsQueue } from '@/hooks/queries/useShorts'
 import { Badge } from '@components/ui/badge'
+import { ChannelVideoEngagementBar } from '@components/Objects/Channel/ChannelVideoEngagementBar'
 
 // Max consecutive auto-skips when walking past broken/inaccessible queue
 // items (Phase 3E requirement 6) — a safety net against an unlikely run of
@@ -118,8 +119,10 @@ function ShortChannelTypeBadge({ channelType }: { channelType?: string }) {
 }
 
 // Bottom-left attribution + subject/topic metadata over a scrim, per §16 —
-// deliberately not the full `ChannelHeader` and no engagement rail
-// (likes/comments/saves/share are Phase 4).
+// deliberately not the full `ChannelHeader`. The engagement rail
+// (likes/comments/saves/share, Phase 4F) is mounted separately in
+// ShortViewerContent, since it needs its own mobile-overlay vs.
+// desktop-alongside placement rather than living inside this overlay.
 function ShortAttributionOverlay({ org, channelVideo }: { org: any; channelVideo: any }) {
   const logoUrl = org?.logo_image ? getOrgLogoMediaDirectory(org.org_uuid, org.logo_image) : null
   const metadataChip = [channelVideo?.subject, channelVideo?.topic].filter(Boolean).join(' · ')
@@ -377,6 +380,19 @@ function ShortViewerContent({ orgslug, channelvideoid }: ShortViewerClientProps)
               )}
             </div>
             <ShortAttributionOverlay org={org} channelVideo={channelVideo} />
+            {/* Mobile: overlaid right-side rail per §16 — lives inside this
+                slide's own frame (not the viewport) so it scrolls with it,
+                same technique as ShortAttributionOverlay. Desktop renders
+                its own alongside-the-frame copy below instead (§16: "not
+                overlaid" on desktop). */}
+            <div className="absolute end-3 bottom-24 z-10 sm:hidden">
+              <ChannelVideoEngagementBar
+                orgId={org?.id}
+                channelVideoId={channelVideo.id}
+                orgslug={orgslug}
+                layout="rail"
+              />
+            </div>
             {nextId === undefined && queue && (
               <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center sm:hidden">
                 <span className="rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">
@@ -390,6 +406,18 @@ function ShortViewerContent({ orgslug, channelvideoid }: ShortViewerClientProps)
         {nextId !== undefined && (
           <div ref={nextSpacerRef} aria-hidden="true" className="h-[100dvh] w-full snap-start sm:hidden" />
         )}
+      </div>
+
+      {/* Desktop: same rail, alongside the frame rather than overlaid (§16) —
+          its own column, matching this file's existing pattern of a
+          desktop-only sibling column for controls (the up/down nav below). */}
+      <div className="hidden sm:flex sm:items-center">
+        <ChannelVideoEngagementBar
+          orgId={org?.id}
+          channelVideoId={channelVideo.id}
+          orgslug={orgslug}
+          layout="rail"
+        />
       </div>
 
       <div className="hidden flex-col gap-3 sm:flex">

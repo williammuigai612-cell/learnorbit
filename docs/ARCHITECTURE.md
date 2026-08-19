@@ -333,7 +333,7 @@ existing Phase 3F Format toggle to "Short" rather than duplicating the upload fo
 `ChannelVideo` row, so no new cascade path is introduced; deleting the channel, its container course, or the
 underlying `Activity` cascades exactly as already documented above.
 
-### Social Engagement (Phase 4A/4B/4C) — direct FKs per relationship, no polymorphism; reuse `get_channel_video` for visibility
+### Social Engagement (Phase 4A/4B/4C/4E/4F) — direct FKs per relationship, no polymorphism; reuse `get_channel_video` for visibility
 Investigated: `OrganizationFollow` (Phase 1C), `DiscussionComment`/`DiscussionReaction`/`DiscussionCommentVote`
 (communities), `PlaygroundReaction`, `services/orgs/channel_videos.py`.
 
@@ -383,12 +383,150 @@ the row, but that check stops a comment being edited/deleted through the wrong v
 newest-first (`creation_date.desc()`), a deliberate UX choice for a video comments panel, diverging from
 `DiscussionComment`'s ascending order without changing anything about that community code path.
 
-**Deferred (Phase 4D onward)**: Save, Share services/endpoints; the Shorts engagement rail (mounting
-`ChannelVideoEngagementBar`/`ChannelVideoCommentsPanel` on the Shorts viewer, deferred to Phase 4F per
-`docs/ROADMAP.md`); card-level engagement counts (`ChannelVideoCard`/`ChannelShortCard`) — avoided for now to
-prevent an N+1 fetch storm across a grid/feed without a batch-counts endpoint; notifications; view counts; comment
+**Service/router pattern (Phase 4E, Shares)**: `services/orgs/channel_video_shares.py` + two endpoints on the
+existing `orgs` router (`GET/POST /orgs/{org_id}/videos/{channelvideo_id}/share`), returning
+`ChannelVideoShareStatus{share_count}` — a public total, same visibility/carry-over as Like's `like_count`. The one
+real departure from the Like/Save pattern: Share has **no unshare/DELETE endpoint and no idempotency check**.
+`share_channel_video` unconditionally inserts a new `ChannelVideoShare` row and commits every call — the Phase 4A
+schema decision (no `UniqueConstraint`) means repeated shares by the same user are all valid, all counted events,
+not a toggle to collapse or an `IntegrityError` to guard against.
+
+**Service/router pattern (Phase 4F, Shorts engagement rail)**: no backend/schema changes — Phase 4A–4E already
+cover every `ChannelVideo`, Shorts included. Pure frontend wiring: `docs/DESIGN_SYSTEM.md` §16 specifies a
+right-side vertical icon+count rail, `--foreground`-on-scrim, overlaid on mobile but placed alongside (not
+overlaid on) the player on desktop — visually incompatible with the light `Button variant="ghost"` row already
+built for the long-form watch page. Rather than duplicating the like/save/share/comment hooks into a
+Shorts-only component, `ChannelVideoEngagementBar` gained a `layout?: 'horizontal' | 'rail'` prop
+(default `'horizontal'`, so the watch page is untouched) — same hooks/handlers, branched JSX only.
+`ChannelVideoCommentsPanel` gained an optional `trigger` render-prop (`{ commentCount, isLoading } =>
+ReactNode`) so the rail can supply its own icon+count trigger for the same Dialog without forking the panel;
+the custom trigger is a `React.forwardRef` component (`RailCommentTrigger`) so Radix's `DialogTrigger asChild`
+can still attach its ref/onClick, same contract the panel's default Button trigger already relied on.
+`short.tsx` mounts the rail twice — absolutely positioned inside `.short-viewer-frame` for mobile (`sm:hidden`,
+scrolls with its own slide, same technique as `ShortAttributionOverlay`) and as a `hidden sm:flex` column
+beside the frame for desktop — mirroring the file's existing dual-markup convention for breakpoint-specific
+controls (the up/down nav buttons use the same pattern).
+
+**Deferred (Phase 4G onward)**: card-level engagement counts (`ChannelVideoCard`/`ChannelShortCard`) — avoided
+for now to prevent an N+1 fetch storm across a grid/feed without a batch-counts endpoint; social-platform share
+targets (LinkedIn/X/WhatsApp/Reddit — `ActivityShareDropdown.tsx` / `CourseShare.tsx` already have this UI for
+other content types, but it wasn't reused for Phase 4E's minimal copy-link-and-record-event action, since
+building the full dropdown is UI scope beyond "Shares end-to-end" wiring); notifications; view counts; comment
 moderation beyond the hard-coded length cap; threaded comment replies; comment likes/upvotes; channel-admin
 moderation-delete of other users' comments.
+
+### Home Feed (Phase 4G) — cross-org query over `OrganizationFollow`, long-form only, reuses `ChannelVideoCard`'s anticipated `channel` prop
+
+Investigated: `apps/api/src/services/orgs/{channel_videos.py,follows.py}`, `apps/api/src/routers/shorts.py`,
+`apps/web/components/Objects/Channel/ChannelVideoCard.tsx`, `apps/web/app/orgs/(withmenu)/[orgslug]/{home-client.tsx,shorts/}`,
+`OrgSidebar.tsx`/`OrgBottomTabBar.tsx`, `docs/PRD.md` §5, `docs/UI_UX_IMPLEMENTATION_PLAN.md` UI-3/UI-5/UI-6.
+
+**1. New service function, not a new table.** `list_home_feed(current_user, db_session)` joins `ChannelVideo` to
+`Organization` filtered by `ChannelVideo.org_id IN (SELECT org_id FROM organizationfollow WHERE user_id = caller)`
+— same `published == True AND visibility == "public"` predicate as `list_channel_videos`/`list_public_shorts`,
+same `creation_date DESC` ordering, no ranking (`docs/PRD.md` §5 non-goal). A follower list of zero rows short-circuits
+to `[]` before the join, matching the "logged in with no follows" state UI-3 calls out.
+
+**2. Long-form only — Shorts are deliberately excluded.** Shorts already have their own global discovery entry
+point (`GET /shorts`) and, per UI-6, a distinct swipe interaction model that "should not reuse the long-form video
+page layout." Mixing Shorts into this grid would duplicate that surface rather than extend it. This realizes the
+video-grid reuse UI-5 anticipated ("video listing/grid components reused across channel and home surfaces") without
+also merging in Shorts' different interaction model. Revisiting a unified feed is a future decision, not assumed here.
+
+**3. Requires authentication — 401 for anonymous, not a public/degraded response.** Unlike `list_public_shorts`
+(unconditionally public) or `get_follow_status` (anonymous-readable), the feed's entire content depends on
+*whose* follows are being read — there is no meaningful anonymous result to degrade to. Mirrors
+`follow_organization`/`unfollow_organization`'s existing 401-for-anonymous convention rather than inventing a new one.
+
+**4. `HomeFeedItem` (new schema) extends `ChannelVideoRead` with `org_slug`/`org_name`/`channel_type`.** Every other
+`ChannelVideoRead` consumer already has channel context from its surrounding page (a channel's own page has
+`ChannelHeader`; a single video's watch page names its channel) — the home feed is the first surface showing a
+video card *outside* its own channel's page, so it's the first place that context needs to travel with the row
+itself. `ChannelVideoCard.tsx`'s `channel?: {name, channel_type}` prop was already added in Phase 2G-2 in
+anticipation of exactly this ("reused on multi-channel surfaces (e.g. a future home feed)") — Phase 4G is the
+first caller to actually pass it.
+
+**5. Card links use the page's own `orgslug`, not each item's owning org's slug.** Same convention the global
+Shorts queue already established (`short.tsx`'s `goTo`/`useChannelVideo(org?.id, ...)`): the video-watch route
+resolves its org context from the URL's `orgslug` param via `useOrg()`, not from the fetched row's real `org_id`.
+This only produces correct results because local dev's `tenancy: single` collapses all org-scoped routing onto
+one seeded org (`docs/CLAUDE.md` Multi-tenancy note) — a real cross-org click-through is unverified in this
+environment, exactly the same accepted, already-documented gap Shorts has, not a new one introduced here. The
+`orgId` prop passed to `ChannelVideoCard` for its owner-only edit-action gate is unaffected by this — it's read
+from `item.org_id` (each video's *real* owning org), so the edit control's permission check is correct regardless.
+
+**6. Navigation: a second fixed, global nav entry, extending Phase 3A point 7's precedent rather than a new
+pattern.** Home is architecturally identical to Shorts — a global, always-on destination, not a per-org
+toggleable feature — so it's rendered the same way: fixed, outside `useOrgMenuItems`, on both `OrgSidebar.tsx`
+and `OrgBottomTabBar.tsx`. The mobile tab bar's `MAX_TABS` drops from `3` to `2` (Home + Shorts + 2 configurable +
+"More" = 5), preserving `docs/DESIGN_SYSTEM.md` §14's "4–5 top-level destinations max" the same way Phase 3A's
+`4 → 3` reduction did when Shorts was added.
+
+**7. Empty state is a single generic message, not two.** UI-3 distinguishes "no follows yet" from "follows but no
+content published" as separate states; the feed endpoint returns `[]` for both and the frontend does not call a
+second endpoint just to tell them apart. A single "follow channels to see their videos, or check back soon"
+message covers both without an extra request purely to distinguish copy.
+
+**Deferred (still, per Phase 4E/4F's list)**: card-level engagement counts, notifications, comment moderation.
+**Newly deferred by this phase**: Shorts in the feed (see point 2); pagination (mirrors `list_channel_videos`/
+`list_public_shorts` — neither paginates yet, so this doesn't add a new inconsistency); a logged-out marketing
+view for `/feed` (the existing global `/home` hub's redirect-to-`/login` behavior for anonymous users is
+untouched — this page instead shows an inline "sign in to see your feed" prompt when visited directly while
+logged out, since it lives inside the org-scoped `(withmenu)` shell rather than replacing `/home`).
+
+### Basic Notifications (Phase 4H) — new `notification` table, channel-admin recipients, best-effort creation on comment
+
+Investigated: `apps/api/src/services/orgs/channel_video_comments.py`, `apps/api/src/services/orgs/orgs.py`
+(`_try_record_org_admin_in_loops`), `apps/api/src/db/{channel_video_comments,channel_video_likes}.py`,
+`apps/api/src/security/org_auth.py`/`rbac/constants.py`, `apps/web/components/Objects/Menus/OrgMenu.tsx`,
+`docs/UI_UX_IMPLEMENTATION_PLAN.md` UI-7.
+
+**1. New single-purpose `notification` table, not a polymorphic one.** Same convention as every Phase 4A
+engagement table (`channelvideolike`/`channelvideosave`/`channelvideocomment`/`channelvideoshare`): a direct FK
+to `channelvideo`, `recipient_id`/`actor_id` FKs to `user`, no `content_type`/`content_id` association.
+`notification_type` is a plain growable string (`"COMMENT"` today) — the same convention `ChannelVideo.visibility`/
+`content_format` already established — so a future `LIKE` type needs no migration or enum change, matching the
+scope's "support future types ... without implementing them now."
+
+**2. Recipient(s) are the channel's admin/maintainer user(s), not a single `owner_id`.** `ChannelVideo` has no
+owner/creator column — channel ownership is expressed the same way `get_channel_video`'s draft-visibility check
+already reads it: `UserOrganization` rows in `ADMIN_OR_MAINTAINER_ROLE_IDS` for the video's `org_id`. Reusing
+that existing predicate (`_get_org_admin_user_ids`, a thin wrapper around the same query `is_org_admin` performs)
+rather than inventing a new "owner" concept keeps this consistent with every other admin-only check on a
+`ChannelVideo`, and correctly notifies every admin of a multi-admin channel — the actor is excluded from the
+recipient list, which is what makes "no self-notification when the owner comments on their own video" fall out
+naturally rather than needing a special case.
+
+**3. Creation is a best-effort call site in `create_channel_video_comment`, mirroring `_try_record_org_admin_in_loops`.**
+`services/orgs/orgs.py` already established the pattern for "this side effect must never fail the primary action":
+wrap the call in try/except, log via `logging.exception`, swallow. `_try_create_comment_notifications` follows it
+exactly, with one addition specific to a DB-backed (not HTTP-backed, unlike Loops) side effect: on failure it also
+rolls back `db_session`, since a partial `add()`/failed `commit()` inside `create_comment_notifications` would
+otherwise leave the session's transaction unusable for whatever runs next in the same request. That rollback
+expires already-loaded ORM instances (SQLAlchemy's default post-rollback behavior), so `create_channel_video_comment`
+builds its `ChannelVideoCommentRead` response *before* firing the notification call — the response no longer
+depends on `comment`'s ORM attributes by the time a notification failure could expire them.
+
+**4. Minimum endpoint set: list, unread-count, mark-one-read, mark-all-read — no threads, no preferences.**
+`GET /notifications`, `GET /notifications/unread-count`, `PATCH /notifications/{uuid}/read`, and
+`PATCH /notifications/read-all`, mounted as a global router (no `org_id` in the path) exactly like `routers/feed.py`
+— a notification is personal to the caller, not org-scoped. Read/mark-read ownership is enforced by scoping every
+query to `recipient_id == caller`; a mismatched or missing `notification_uuid` returns a uniform 404 ("Notification
+not found"), the same non-leaking convention `channel_video_comments.py` already uses for a comment editable only
+by its author.
+
+**5. Frontend: a bell dropdown in the existing header, not a new page or nav destination.** Per
+`docs/UI_UX_IMPLEMENTATION_PLAN.md` UI-7, notifications are "a simple list/indicator, not a full real-time system" —
+`NotificationBell` (`apps/web/components/Objects/Menus/NotificationBell.tsx`) reuses `OrgMenu.tsx`'s existing
+`CopilotMenuButton` dropdown-trigger pattern (icon button + `DropdownMenu`) rather than adding a nav-bar entry,
+a dedicated route, or a new interaction shell. It's rendered both in the desktop header row and inside the
+existing mobile hamburger panel (alongside `HeaderProfileBox`), so no new mobile surface was introduced either.
+Unread count polls every 60s (`refetchInterval`) rather than a WebSocket/SSE connection — explicitly out of scope
+per the task and PRD §3.
+
+**Deferred (unchanged from Phase 4E/4F/4G's list, still not part of this phase)**: LIKE notifications (the type
+column supports it; no LIKE call site was added), email notifications/digests, push notifications, notification
+preferences/settings, threaded notifications, card-level engagement counts, comment moderation.
 
 ### Repo-wide dev-environment blockers (fixed) — `tsconfig.json` `baseUrl` removal, and the Next.js dynamic-segment/route-group 404
 Two standing, pre-existing blockers logged since Phase 2G-3/3F (`tsc --noEmit` unusable; live browser verification of every

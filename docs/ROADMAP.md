@@ -35,12 +35,12 @@
 - [x] Shorts navigation entry
 
 ## Phase 4 — Social Learning
-- [ ] Home feed
-- [ ] Likes
-- [ ] Comments
-- [ ] Saves
-- [ ] Sharing
-- [ ] Basic notifications
+- [x] Home feed
+- [x] Likes
+- [x] Comments
+- [x] Saves
+- [x] Sharing
+- [x] Basic notifications
 
 ## Phase 5 — Academic Library
 - [ ] PDF resources

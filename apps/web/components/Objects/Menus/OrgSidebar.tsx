@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTranslation } from 'react-i18next'
-import { FilmSlate } from '@phosphor-icons/react'
+import { FilmSlate, House } from '@phosphor-icons/react'
 import { useOrgMenuItems } from '@components/Objects/Menus/OrgMenuLinks'
 import { useJoinBannerVisible, JOIN_BANNER_HEIGHT } from '@components/Objects/Banners/OrgJoinBanner'
 import { getUriWithOrg } from '@services/config/config'
@@ -28,6 +28,12 @@ export function OrgSidebar({ orgslug }: { orgslug: string }) {
   const shortsHref = getUriWithOrg(orgslug, '/shorts')
   const isShortsActive = pathname === shortsHref || pathname?.startsWith(`${shortsHref}/`)
 
+  // Home (Phase 4G) is a second fixed, global destination — same rationale
+  // as Shorts above: it's a cross-org personalized feed, not a per-org
+  // feature-gated menu item, so it can't come from useOrgMenuItems either.
+  const homeHref = getUriWithOrg(orgslug, '/feed')
+  const isHomeActive = pathname === homeHref || pathname?.startsWith(`${homeHref}/`)
+
   return (
     <aside
       aria-label="Primary navigation"
@@ -35,6 +41,17 @@ export function OrgSidebar({ orgslug }: { orgslug: string }) {
       style={{ top: topOffset, zIndex: 'var(--z-nav)' }}
     >
       <nav className="flex flex-col gap-1 p-3">
+        <Link href={homeHref}>
+          <span
+            className={cn(
+              'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold transition-colors',
+              isHomeActive ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
+            )}
+          >
+            <House size={22} weight={isHomeActive ? 'fill' : 'regular'} aria-hidden="true" />
+            <span className="truncate">{t('feed.nav.label', { defaultValue: 'Home' })}</span>
+          </span>
+        </Link>
         <Link href={shortsHref}>
           <span
             className={cn(

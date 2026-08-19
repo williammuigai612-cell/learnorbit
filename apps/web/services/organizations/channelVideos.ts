@@ -221,6 +221,40 @@ export async function unsaveChannelVideo(
   return errorHandling(result)
 }
 
+export interface ChannelVideoShareStatus {
+  share_count: number
+}
+
+/** Total share count (Phase 4E). Supports anonymous viewers of a public
+ * video — same visibility rule as getChannelVideo. Public total across all
+ * users, same as like_count. */
+export async function getChannelVideoShareStatus(
+  org_id: number,
+  channelvideo_id: number | string,
+  access_token?: string
+): Promise<ChannelVideoShareStatus> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/share`,
+    RequestBodyWithAuthHeader('GET', null, null, access_token)
+  )
+  return errorHandling(result)
+}
+
+/** Record a share of the video as the authenticated user (Phase 4E). Not
+ * idempotent — a share is an append-only event, so repeated calls each
+ * count separately and there is no unshare. */
+export async function shareChannelVideo(
+  org_id: number,
+  channelvideo_id: number | string,
+  access_token: string
+): Promise<ChannelVideoShareStatus> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/share`,
+    RequestBodyWithAuthHeader('POST', null, null, access_token)
+  )
+  return errorHandling(result)
+}
+
 /** Minimal author projection — mirrors the API's UserReadAuthor. */
 export interface ChannelVideoCommentAuthor {
   id: number

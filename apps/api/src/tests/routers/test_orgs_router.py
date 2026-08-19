@@ -11,6 +11,7 @@ from src.db.organizations import OrganizationRead
 from src.db.organization_follows import OrganizationFollowStatus
 from src.services.orgs.channel_video_likes import ChannelVideoLikeStatus
 from src.services.orgs.channel_video_saves import ChannelVideoSaveStatus
+from src.services.orgs.channel_video_shares import ChannelVideoShareStatus
 from src.services.orgs.channel_video_comments import ChannelVideoCommentRead
 from src.routers.orgs.orgs import router as orgs_router
 from src.security.auth import get_authenticated_user, get_current_user
@@ -694,6 +695,64 @@ class TestChannelVideoLikeEndpoints:
 
         assert response.status_code == 200
         assert response.json() == {"is_liked": False, "like_count": 2}
+
+
+class TestChannelVideoShareEndpoints:
+    """Router wiring for Phase 4E — mirrors TestChannelVideoLikeEndpoints,
+    but Share is an append-only event log with no unshare/DELETE endpoint:
+    mocked service calls verify route/method/response-shape, while the 401
+    case exercises the real service so the auth guard itself is proven, not
+    just its mocked stand-in."""
+
+    async def test_get_share_status(self, client):
+        with patch(
+            "src.routers.orgs.orgs.get_share_status",
+            new_callable=AsyncMock,
+            return_value=ChannelVideoShareStatus(share_count=5),
+        ):
+            response = await client.get("/api/v1/orgs/1/videos/1/share")
+
+        assert response.status_code == 200
+        assert response.json() == {"share_count": 5}
+
+    async def test_share_channel_video(self, client):
+        with patch(
+            "src.routers.orgs.orgs.share_channel_video",
+            new_callable=AsyncMock,
+            return_value=ChannelVideoShareStatus(share_count=1),
+        ) as share_mock:
+            response = await client.post("/api/v1/orgs/1/videos/1/share")
+
+        assert response.status_code == 200
+        assert response.json() == {"share_count": 1}
+        share_mock.assert_awaited_once()
+
+    async def test_share_requires_authentication(self, app, anonymous_user):
+        # Not mocking share_channel_video: the real service raises 401 for an
+        # AnonymousUser before touching the database, same pattern as
+        # test_like_requires_authentication above.
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.post("/api/v1/orgs/1/videos/1/share")
+
+        assert response.status_code == 401
+
+    async def test_get_share_status_allows_anonymous(self, app, anonymous_user):
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        with patch(
+            "src.routers.orgs.orgs.get_share_status",
+            new_callable=AsyncMock,
+            return_value=ChannelVideoShareStatus(share_count=3),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as anon_client:
+                response = await anon_client.get("/api/v1/orgs/1/videos/1/share")
+
+        assert response.status_code == 200
+        assert response.json() == {"share_count": 3}
 
 
 class TestChannelVideoSaveEndpoints:

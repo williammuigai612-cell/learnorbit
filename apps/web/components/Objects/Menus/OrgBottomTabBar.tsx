@@ -2,16 +2,17 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTranslation } from 'react-i18next'
-import { DotsThreeCircle, FilmSlate } from '@phosphor-icons/react'
+import { DotsThreeCircle, FilmSlate, House } from '@phosphor-icons/react'
 import { useOrgMenuItems } from '@components/Objects/Menus/OrgMenuLinks'
 import { getUriWithOrg } from '@services/config/config'
 import { cn } from '@/lib/utils'
 
-// Reduced from 4 to 3 config-driven slots to make room for the fixed Shorts
-// tab below (Shorts + 3 + "More" = 5), preserving docs/DESIGN_SYSTEM.md §14's
-// documented 4-5 top-level destination cap rather than exceeding it. See
-// docs/ARCHITECTURE.md § "Videos / Shorts (Phase 3A)" point 7.
-const MAX_TABS = 3
+// Reduced from 3 to 2 config-driven slots to make room for both fixed tabs
+// below — Home + Shorts + 2 + "More" = 5 — preserving docs/DESIGN_SYSTEM.md
+// §14's documented 4-5 top-level destination cap rather than exceeding it.
+// See docs/ARCHITECTURE.md § "Videos / Shorts (Phase 3A)" point 7 (Shorts,
+// the original fixed tab) and its Phase 4G extension (Home).
+const MAX_TABS = 2
 
 // Mobile/tablet (< lg) primary navigation — per docs/DESIGN_SYSTEM.md §14:
 // 4-5 top-level destinations max, everything else behind "More" rather than
@@ -36,12 +37,27 @@ export function OrgBottomTabBar({
   const shortsHref = getUriWithOrg(orgslug, '/shorts')
   const isShortsActive = pathname === shortsHref || pathname?.startsWith(`${shortsHref}/`)
 
+  // Home (Phase 4G) is a second fixed, global destination — same rationale
+  // as Shorts above.
+  const homeHref = getUriWithOrg(orgslug, '/feed')
+  const isHomeActive = pathname === homeHref || pathname?.startsWith(`${homeHref}/`)
+
   return (
     <nav
       aria-label="Primary navigation"
       className="lg:hidden fixed bottom-0 start-0 end-0 flex items-stretch border-t border-border bg-background"
       style={{ zIndex: 'var(--z-nav)', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
+      <Link
+        href={homeHref}
+        className={cn(
+          'flex flex-1 flex-col items-center justify-center gap-0.5 py-2 min-h-11 text-xs font-medium transition-colors',
+          isHomeActive ? 'text-primary' : 'text-muted-foreground'
+        )}
+      >
+        <House size={22} weight={isHomeActive ? 'fill' : 'regular'} aria-hidden="true" />
+        <span className="truncate max-w-full px-1">{t('feed.nav.label', { defaultValue: 'Home' })}</span>
+      </Link>
       <Link
         href={shortsHref}
         className={cn(

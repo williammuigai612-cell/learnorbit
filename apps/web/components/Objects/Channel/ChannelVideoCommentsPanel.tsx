@@ -42,6 +42,9 @@ const MAX_COMMENT_LENGTH = 2000
 interface ChannelVideoCommentsPanelProps {
   orgId: number | undefined
   channelVideoId: number | string | undefined
+  /** Custom Dialog trigger visual (Phase 4F, Shorts rail) — defaults to the
+   * standard ghost Button used on the long-form watch page when omitted. */
+  trigger?: (_props: { commentCount: number | undefined; isLoading: boolean }) => React.ReactNode
 }
 
 function getAvatarUrl(author: ChannelVideoComment['author']): string | null {
@@ -219,7 +222,7 @@ function CommentRow({
   )
 }
 
-export function ChannelVideoCommentsPanel({ orgId, channelVideoId }: ChannelVideoCommentsPanelProps) {
+export function ChannelVideoCommentsPanel({ orgId, channelVideoId, trigger }: ChannelVideoCommentsPanelProps) {
   const { t } = useTranslation()
   const session = useLHSession() as any
   const isAuthenticated = session?.status === 'authenticated'
@@ -242,18 +245,22 @@ export function ChannelVideoCommentsPanel({ orgId, channelVideoId }: ChannelVide
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label={t('video.comments.open', { defaultValue: 'View comments' })}
-          className="gap-1.5 px-3"
-        >
-          <MessageCircle size={16} aria-hidden="true" className="text-muted-foreground" />
-          {commentCount !== undefined && (
-            <span className="text-muted-foreground">{commentCount}</span>
-          )}
-        </Button>
+        {trigger ? (
+          trigger({ commentCount, isLoading })
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label={t('video.comments.open', { defaultValue: 'View comments' })}
+            className="gap-1.5 px-3"
+          >
+            <MessageCircle size={16} aria-hidden="true" className="text-muted-foreground" />
+            {commentCount !== undefined && (
+              <span className="text-muted-foreground">{commentCount}</span>
+            )}
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] flex flex-col p-6">
         <DialogHeader>

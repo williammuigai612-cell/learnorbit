@@ -51,6 +51,9 @@ export const queryKeys = {
     // Phase 4C
     comments: (orgId: number, channelVideoId: number | string) =>
       ['channelVideo', orgId, channelVideoId, 'comments'] as const,
+    // Phase 4E
+    share: (orgId: number, channelVideoId: number | string) =>
+      ['channelVideo', orgId, channelVideoId, 'share'] as const,
   },
   trail: {
     org: (orgId: number) => ['trail', 'org', orgId] as const,
@@ -59,6 +62,18 @@ export const queryKeys = {
     // Global, cross-org queue (Phase 3E) — one cache entry, no per-org/filter
     // variants, mirroring the unscoped GET /shorts endpoint (Phase 3C).
     queue: () => ['shorts', 'queue'] as const,
+  },
+  feed: {
+    // Personalized, cross-org home feed (Phase 4G) — one cache entry per
+    // viewer, keyed by user id since content depends on the caller's follows
+    // (unlike shorts.queue, which is unconditionally global).
+    home: (userId: number | undefined) => ['feed', 'home', userId] as const,
+  },
+  notifications: {
+    // In-app notifications (Phase 4H) — global, cross-org, keyed by viewer
+    // (same rationale as feed.home: content is personal to the caller).
+    list: (userId: number | undefined) => ['notifications', 'list', userId] as const,
+    unreadCount: (userId: number | undefined) => ['notifications', 'unreadCount', userId] as const,
   },
   folders: {
     list: (orgId: number) => ['folders', orgId] as const,

@@ -7,6 +7,7 @@ import { queryKeys } from '@/lib/query/keys'
 import { getUriWithOrg } from '@services/config/config'
 import { fetchRAGChatSessions, RAGChatSession } from '@services/ai/ai'
 import { HeaderProfileBox } from '@components/Security/HeaderProfileBox'
+import { NotificationBell } from '@components/Objects/Menus/NotificationBell'
 import { OrgBottomTabBar } from '@components/Objects/Menus/OrgBottomTabBar'
 import { getOrgLogoMediaDirectory } from '@services/media/media'
 import { useLHSession } from '@components/Contexts/LHSessionContext'
@@ -355,6 +356,13 @@ export const OrgMenu = (props: any) => {
               </div>
             )}
 
+            {/* Notifications (Phase 4H) */}
+            <AuthenticatedClientElement checkMethod="authentication">
+              <div className="hidden md:flex">
+                <NotificationBell orgslug={orgslug} iconBtnClass={colors.iconBtn} />
+              </div>
+            </AuthenticatedClientElement>
+
             <div className="hidden md:flex">
               <HeaderProfileBox primaryColor={primaryColor} />
             </div>
@@ -392,6 +400,9 @@ export const OrgMenu = (props: any) => {
           <div className="w-full px-2">
             <SearchBar orgslug={orgslug} isMobile={true} />
           </div>
+          <AuthenticatedClientElement checkMethod="authentication">
+            <NotificationBell orgslug={orgslug} />
+          </AuthenticatedClientElement>
           <div className="border-t border-border">
             <HeaderProfileBox />
           </div>

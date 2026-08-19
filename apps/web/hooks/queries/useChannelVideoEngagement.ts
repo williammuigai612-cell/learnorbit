@@ -17,6 +17,9 @@ import {
   updateChannelVideoComment,
   deleteChannelVideoComment,
   type ChannelVideoComment,
+  getChannelVideoShareStatus,
+  shareChannelVideo,
+  type ChannelVideoShareStatus,
 } from '@services/organizations/channelVideos'
 
 // Phase 4B — likes only. Follows the same status-query + two-mutation shape
@@ -172,6 +175,40 @@ export function useUpdateChannelVideoComment(
       queryClient.setQueryData<ChannelVideoComment[]>(key, (prev) =>
         (prev ?? []).map((c) => (c.comment_uuid === comment.comment_uuid ? comment : c))
       )
+    },
+  })
+}
+
+// Phase 4E — shares. Same status-query shape as the Like hooks above, but
+// the mutation has no "un-" counterpart: a share is an append-only event, so
+// every call adds to share_count rather than toggling it.
+export function useChannelVideoShareStatus(
+  orgId: number | undefined,
+  channelVideoId: number | string | undefined
+) {
+  const session = useLHSession() as any
+  const accessToken = session?.data?.tokens?.access_token as string | undefined
+
+  return useQuery<ChannelVideoShareStatus>({
+    queryKey: queryKeys.channelVideos.share(orgId!, channelVideoId!),
+    queryFn: () => getChannelVideoShareStatus(orgId!, channelVideoId!, accessToken),
+    enabled: !!orgId && !!channelVideoId,
+    staleTime: 30_000,
+  })
+}
+
+export function useShareChannelVideo(
+  orgId: number | undefined,
+  channelVideoId: number | string | undefined
+) {
+  const session = useLHSession() as any
+  const accessToken = session?.data?.tokens?.access_token as string | undefined
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: () => shareChannelVideo(orgId!, channelVideoId!, accessToken!),
+    onSuccess: (data: ChannelVideoShareStatus) => {
+      queryClient.setQueryData(queryKeys.channelVideos.share(orgId!, channelVideoId!), data)
     },
   })
 }

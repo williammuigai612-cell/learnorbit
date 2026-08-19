@@ -60,6 +60,11 @@ from src.services.orgs.channel_video_saves import (
     save_channel_video,
     unsave_channel_video,
 )
+from src.services.orgs.channel_video_shares import (
+    ChannelVideoShareStatus,
+    get_share_status,
+    share_channel_video,
+)
 from src.services.orgs.channel_video_comments import (
     ChannelVideoCommentCreate,
     ChannelVideoCommentRead,
@@ -2054,6 +2059,63 @@ async def api_unsave_channel_video(
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoSaveStatus:
     return await unsave_channel_video(request, org_id, channelvideo_id, current_user, db_session)
+
+
+# Channel video shares (LearnOrbit Phase 4E) — an append-only event log, not
+# a toggle: repeated shares are all valid and all counted, so there is no
+# unshare/DELETE endpoint here. See docs/ARCHITECTURE.md § "Social
+# Engagement (Phase 4A/4B)".
+@router.get(
+    "/{org_id}/videos/{channelvideo_id}/share",
+    response_model=ChannelVideoShareStatus,
+    summary="Get share count for a channel video",
+    description=(
+        "Return the total number of times this video has been shared. "
+        "Supports anonymous viewers. Follows the same published+public "
+        "visibility rule as GET /{org_id}/videos/{channelvideo_id}."
+    ),
+    responses={
+        200: {"description": "Share count.", "model": ChannelVideoShareStatus},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_get_channel_video_share_status(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoShareStatus:
+    return await get_share_status(request, org_id, channelvideo_id, current_user, db_session)
+
+
+@router.post(
+    "/{org_id}/videos/{channelvideo_id}/share",
+    response_model=ChannelVideoShareStatus,
+    summary="Record a share of a channel video",
+    description=(
+        "Record a share event as the authenticated user and return the "
+        "updated total share count. Not idempotent — repeated calls each "
+        "count as a separate share, since sharing a video multiple times is "
+        "a valid, real action. Only possible for a video this viewer could "
+        "actually watch (same visibility rule as the watch page)."
+    ),
+    responses={
+        200: {"description": "Share recorded.", "model": ChannelVideoShareStatus},
+        401: {"description": "Not authenticated"},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+    },
+)
+async def api_share_channel_video(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoShareStatus:
+    return await share_channel_video(request, org_id, channelvideo_id, current_user, db_session)
 
 
 # Channel video comments (LearnOrbit Phase 4C) — flat comments (no threading,
