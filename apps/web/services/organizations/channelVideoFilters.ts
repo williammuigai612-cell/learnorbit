@@ -24,7 +24,11 @@ export function normalizeChannelVideoFilters(
   const normalized: ChannelVideoFilters = {}
   for (const key of FILTER_KEYS) {
     const value = filters[key]
-    if (value && value.trim()) normalized[key] = value
+    // Each key's value type here is independently a string (content_format's
+    // 'long' | 'short' included), but TS can't correlate `key` and `value`
+    // across a union when writing back through a generic key — same value,
+    // narrower write-side type than TS can verify statically.
+    if (value && value.trim()) (normalized as Record<string, string>)[key] = value
   }
   return Object.keys(normalized).length > 0 ? normalized : undefined
 }

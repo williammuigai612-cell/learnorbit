@@ -1,6 +1,5 @@
 'use client';
-import { use, useEffect, type ReactNode } from "react";
-import '@styles/globals.css'
+import { useEffect, type ReactNode } from "react";
 import Watermark from '@components/Objects/Watermark'
 import { SessionGate } from '@components/Contexts/LHSessionContext'
 import { OrgMenu } from '@components/Objects/Menus/OrgMenu'
@@ -17,6 +16,12 @@ import { PageViewTracker } from '@components/Analytics/PageViewTracker'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { usePlan } from '@components/Hooks/usePlan'
 import { getGoogleFontUrl, DEFAULT_FONT } from '@/lib/fonts'
+
+// The menu-bearing org chrome (nav, sidebar, banners, footer, podcast
+// player) — extracted out of app/orgs/(withmenu)/[orgslug]/layout.tsx's
+// default export into a plain component so that layout file can compose it
+// with the shared OrgRootLayout (see components/Contexts/OrgRootLayout.tsx
+// and docs/ARCHITECTURE.md § "Next.js dynamic-segment/route-group 404").
 
 // Helper to convert hex to rgba
 const hexToRgba = (hex: string, alpha: number): string => {
@@ -141,24 +146,13 @@ function LayoutContent({ children, orgslug }: { children: ReactNode; orgslug: st
   )
 }
 
-export default function RootLayout(
-  props: {
-    children: ReactNode
-    params: Promise<any>
-  }
-) {
-  const params = use(props.params);
-
-  const {
-    children
-  } = props;
-
+export function OrgMenuChrome({ orgslug, children }: { orgslug: string; children: ReactNode }) {
   return (
     <>
       <SessionGate>
       <OrgJoinBannerProvider>
         <PodcastPlayerProvider>
-          <LayoutContent orgslug={params?.orgslug}>
+          <LayoutContent orgslug={orgslug}>
             {children}
           </LayoutContent>
           <PodcastPlayer />

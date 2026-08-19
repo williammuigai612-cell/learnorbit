@@ -25,7 +25,12 @@ interface ChannelVideosSectionProps {
 
 const ALL_VALUE = 'all'
 
-type FilterField = keyof ChannelVideoFilters
+// Excludes 'content_format': this section's UI only ever lets a viewer set
+// subject/topic/level — content_format is fixed to 'long' via
+// longFormFilters below, never user-selectable — and narrowing here avoids a
+// correlated-union assignment error on `next[field] = value` (content_format
+// alone has a non-string literal type among these fields).
+type FilterField = Exclude<keyof ChannelVideoFilters, 'content_format'>
 
 function VideoCardSkeleton() {
   return (

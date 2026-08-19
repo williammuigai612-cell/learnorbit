@@ -333,6 +333,114 @@ existing Phase 3F Format toggle to "Short" rather than duplicating the upload fo
 `ChannelVideo` row, so no new cascade path is introduced; deleting the channel, its container course, or the
 underlying `Activity` cascades exactly as already documented above.
 
+### Social Engagement (Phase 4A/4B/4C) — direct FKs per relationship, no polymorphism; reuse `get_channel_video` for visibility
+Investigated: `OrganizationFollow` (Phase 1C), `DiscussionComment`/`DiscussionReaction`/`DiscussionCommentVote`
+(communities), `PlaygroundReaction`, `services/orgs/channel_videos.py`.
+
+**Schema (Phase 4A)**: four new tables — `ChannelVideoLike`, `ChannelVideoSave`, `ChannelVideoComment`,
+`ChannelVideoShare` — each with a direct `channelvideo_id` FK (`ondelete="CASCADE"`), matching every existing
+precedent (`OrganizationFollow.org_id`, `DiscussionComment.discussion_id`). No polymorphic
+`content_type`/`content_id` association: `ChannelVideo` is Phase 4's only content entity (it already covers both
+long-form and Shorts per Phase 3A), so a generic association would be speculative generality. Like/Save are
+identical toggle shapes (`UniqueConstraint(channelvideo_id, user_id)`, both columns indexed — mirrors
+`OrganizationFollow`) but kept as separate tables: saves are a private per-user list, likes are a public count —
+different access patterns, not the same relationship with a label. Comment mirrors `DiscussionComment` minus
+`parent_comment_id` (no threading) and `upvote_count` (no voting) — both out of scope. Share is an append-only
+event log (no uniqueness constraint — repeated shares are valid) with a required, non-nullable `user_id`: no
+anonymous-identity infrastructure exists anywhere in this schema to attribute an anonymous share to.
+
+**Service/router pattern (Phase 4B, Likes)**: `services/orgs/channel_video_likes.py` + three endpoints on the
+existing `orgs` router (`GET/POST/DELETE /orgs/{org_id}/videos/{channelvideo_id}/like`), returning a combined
+`ChannelVideoLikeStatus` (`is_liked` + `like_count`) — same shape as `OrganizationFollowStatus`. Two decisions
+worth carrying into 4C–4E (Save/Comment/Share):
+- **Visibility/ownership is never re-implemented per feature.** Every like/status function calls the existing
+  `get_channel_video` first, which already raises the project's real 404/403 rule (published+public visible to
+  anyone, otherwise this channel's owner/admin only). This guarantees a viewer can never like/comment-on/save a
+  video they couldn't actually watch, without duplicating that predicate — the same reuse should apply to Save
+  and Comment.
+- **Counts are always live `func.count()` queries**, never a denormalized counter column on `ChannelVideo` —
+  follows the more recent `OrganizationFollow._follower_count` convention over the older, upstream
+  `Discussion.upvote_count` cached-counter pattern, since a cached counter has a cache-invalidation failure mode
+  (any write path that forgets to update it silently drifts) and current content volumes don't justify the
+  trade.
+- Concurrent duplicate writes (e.g. a rapid double-click) are handled by catching `IntegrityError` on the unique
+  constraint and treating it as idempotent success, not a 500 — same pattern as `follow_organization`.
+
+**Service/router pattern (Phase 4C, Comments)**: `services/orgs/channel_video_comments.py` + four endpoints on
+the existing `orgs` router (`GET/POST /orgs/{org_id}/videos/{channelvideo_id}/comments`, `PUT/DELETE
+.../comments/{comment_uuid}`), returning `ChannelVideoCommentRead` with a nested `UserReadAuthor` — same
+author-projection reuse as `DiscussionCommentReadWithAuthor`. Confirms both carry-over decisions from 4B: create/list
+call the existing `get_channel_video` first (no re-implemented visibility), and validation is a single hard-coded
+`MAX_COMMENT_LENGTH = 2000` constant plus a non-empty-after-strip check — no configurable per-org moderation
+(`services/communities/moderation.py`'s `validate_comment_content` is hard-coupled to `Community.moderation_settings`,
+confirmed not reusable as-is for `ChannelVideo`, so not used). One new decision Comment introduces beyond the Like
+pattern: edit/delete are **author-only**, not owner/admin — deliberately narrower than `DiscussionComment`'s
+update/delete (which lets a community admin delete others' comments too), because Phase 4C's scope is explicitly
+"edit own / delete own," not moderation; a channel owner cannot yet remove another user's comment on their own
+video (noted as a real gap, not built without a separate request). Edit/delete also re-check that the comment's
+`channelvideo_id` matches the URL's before touching it (404 on mismatch) — `comment_uuid` alone is enough to find
+the row, but that check stops a comment being edited/deleted through the wrong video's URL. List order is
+newest-first (`creation_date.desc()`), a deliberate UX choice for a video comments panel, diverging from
+`DiscussionComment`'s ascending order without changing anything about that community code path.
+
+**Deferred (Phase 4D onward)**: Save, Share services/endpoints; the Shorts engagement rail (mounting
+`ChannelVideoEngagementBar`/`ChannelVideoCommentsPanel` on the Shorts viewer, deferred to Phase 4F per
+`docs/ROADMAP.md`); card-level engagement counts (`ChannelVideoCard`/`ChannelShortCard`) — avoided for now to
+prevent an N+1 fetch storm across a grid/feed without a batch-counts endpoint; notifications; view counts; comment
+moderation beyond the hard-coded length cap; threaded comment replies; comment likes/upvotes; channel-admin
+moderation-delete of other users' comments.
+
+### Repo-wide dev-environment blockers (fixed) — `tsconfig.json` `baseUrl` removal, and the Next.js dynamic-segment/route-group 404
+Two standing, pre-existing blockers logged since Phase 2G-3/3F (`tsc --noEmit` unusable; live browser verification of every
+`/orgs/[orgslug]/*` page blocked) are now fixed. Both were infrastructure, not product work — tracked here because fixing
+the second required an app-tree restructure other work will build on top of.
+
+**`tsconfig.json` `baseUrl` (TS5101 deprecation)**: TypeScript 6.0.3 (installed) errors on `"baseUrl": "."` as deprecated
+(removed in TS 7.0). Fix: removed `baseUrl` entirely and added an explicit leading `./` to every `paths` pattern (TS
+resolves `paths` relative to the tsconfig file's own directory once `baseUrl` is absent — same target directory as
+`baseUrl: "."` was, so no behavior change for the `@alias/*` imports). This *did* have one real behavior change: with
+`baseUrl` gone, TypeScript no longer falls back to resolving a bare, non-aliased specifier (e.g. `'app/orgs/...'`,
+`'public/foo.png'`) relative to the project root — those must go through an existing `@/*`/`@public/*` alias instead. Two
+`.tsx` files had bare `'app/orgs/...'` type-only imports (fixed to `@/app/orgs/...`), and 21 files across the codebase had
+bare `'public/*.png'` static-image imports (fixed to `@public/*.png` — the Next.js *bundler*, not just `tsc`, reads
+`baseUrl` for this too, so these broke `next dev`, not just type-checking, once `baseUrl` was removed). Also surfaced two
+real, previously-unchecked type errors (`tsc` had never successfully run to completion before): a `ChannelVideoFilters`
+correlated-union write in `channelVideoFilters.ts`'s `normalizeChannelVideoFilters` (cast to `Record<string, string>` — all
+per-key value types are independently `string`-compatible, TS just can't verify that across a generic key in a loop), and
+the same pattern in `ChannelVideosSection.tsx`'s `setFilter` (fixed by narrowing `FilterField` to exclude `content_format`,
+which that component's UI never actually sets — a more precise fix than a cast, since it's genuinely never called that way).
+
+**Next.js `[dynamicSegment]/(routeGroup)/page.tsx` 404**: confirmed (Phase 3F investigation) that Next.js 16.2.9 in this
+environment 404s every route shaped dynamic-segment-then-route-group, while route-group-then-dynamic-segment (and a
+dynamic segment with no route group at all) both resolve fine. `app/orgs/[orgslug]/(withmenu)/page.tsx` matched the broken
+shape; because it sits directly under the `[orgslug]` dynamic segment, the whole `[orgslug]` route tree failed, including
+`dash` (a plain folder, not a route group — normally an unaffected shape on its own). Fix: moved the entire `(withmenu)`
+sub-tree from `app/orgs/[orgslug]/(withmenu)/*` to `app/orgs/(withmenu)/[orgslug]/*` (`git mv`, 65 files) — route group now
+precedes the dynamic segment, matching the confirmed-working shape. URLs are unchanged (route groups never appear in the
+URL) and directory depth is unchanged (only the two segments swap order), so no other relative import in the moved tree
+needed touching; only two files elsewhere had absolute `@/app/orgs/[orgslug]/(withmenu)/...` imports and were updated
+(`lib/dashboard-search/registry.ts`, `components/Copilot/CopilotBubble.tsx`).
+
+The move split `[orgslug]/layout.tsx`'s single `OrgProvider` shell — previously the sole ancestor of both `(withmenu)` and
+`dash` — across two physical layout files, since `dash` still needs it at `app/orgs/[orgslug]/layout.tsx` while
+`(withmenu)` now needs its own copy at `app/orgs/(withmenu)/[orgslug]/layout.tsx` (a layout inside a route group can't see
+`params.orgslug` until the dynamic segment below it, so the shell can't live any higher than that). Rather than duplicate
+the JSX, it's extracted into `components/Contexts/OrgRootLayout.tsx` (the provider/toploader/toast/footer shell) and
+`lib/seo/orgFaviconMetadata.ts` (the shared `generateMetadata` body), which both layout files import; `(withmenu)`'s
+menu/sidebar/banner/podcast-player chrome (previously that tree's `layout.tsx` default export) is similarly extracted into
+`components/Objects/Menus/OrgMenuChrome.tsx` so the new `(withmenu)/[orgslug]/layout.tsx` can compose
+`OrgRootLayout > OrgMenuChrome > children` in one file without reintroducing a route-group-under-dynamic-segment nesting.
+`dash`'s own layout/context/data-fetching is untouched.
+
+Verified: `tsc --noEmit` clean (was blocked repo-wide). Live: started the dev server directly (`bun run dev`, no backend),
+curled `/`, and five representative routes across both trees — `/orgs/{slug}/videos`, `/orgs/{slug}/courses`,
+`/orgs/{slug}/dash`, `/orgs/{slug}/dash/courses`, `/orgs/{slug}/search` — for a nonexistent org slug; all returned the
+app's own `not-found.tsx` content (an application-level 404, i.e. the org lookup ran and failed) rather than Next's bare
+framework 404, confirming routing now reaches application code across the whole tree. Data-level rendering against a real
+org was not verified this session (backend wasn't started). `bun test tests`: 112 passed, same pre-existing 12
+failures/1 error as before (`billing-internal-key.test.mjs`, `catalog-pagination.test.mjs`'s missing fixture, the `ar.json`
+timeout) — no regressions from either fix.
+
 ## Areas To Map
 - Frontend application
 - API/backend

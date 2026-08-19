@@ -15,6 +15,25 @@
 **Phase 4 — Social Learning** (Phase 1 — Channels, Phase 2 — Educational Video, and Phase 3 — Shorts (3A–3H) are all complete; see below). Phase 4 planning/scoping is complete (see `docs/ARCHITECTURE.md` § "Social Engagement (Phase 4A/4B)"); implementation is underway — Phase 4A (engagement schema), Phase 4B (Likes end-to-end), Phase 4C (Comments end-to-end), and Phase 4D (Saves end-to-end) are complete. **Next up: Phase 4E — Shares.**
 
 ## Status Snapshot
+- **Infrastructure fix (2026-08-19): both repo-wide dev-environment blockers
+  logged since Phase 2G-3/3F are resolved** — `tsc --noEmit`'s `baseUrl`
+  deprecation error, and the Next.js `[dynamicSegment]/(routeGroup)/page.tsx`
+  404 that blocked live browser verification of every `/orgs/[orgslug]/*`
+  page. See `docs/ARCHITECTURE.md` § "Repo-wide dev-environment blockers
+  (fixed)" for the full fix (tsconfig `paths` restructure + 23 bare-import
+  fixes; `(withmenu)` route group moved before `[orgslug]` via `git mv`, with
+  the shared org layout/chrome split into `components/Contexts/OrgRootLayout.tsx`
+  + `components/Objects/Menus/OrgMenuChrome.tsx` + `lib/seo/orgFaviconMetadata.ts`
+  to avoid duplicating that JSX across the two resulting physical layout
+  files). Verified: `tsc --noEmit` clean; live dev server + curl confirmed
+  routing reaches application code (not a framework 404) across both the
+  `(withmenu)` and `dash` trees for a nonexistent org slug; `bun test tests`
+  unchanged (112 passed, same pre-existing 12 failures/1 error). Every prior
+  phase entry below that notes "verified via backend tests + lint only" due
+  to this blocker (3F, 3G, 3H, UI-1, 4B, 4C, 4D) is a historically accurate
+  record of what was verified *at the time* — none of it has been
+  retroactively re-verified live in this fix; that remains available as a
+  follow-up if wanted, not done automatically here.
 - Phase 1 (1A–1C — Channels): complete
 - UI-0 (Design Foundations): complete
 - UI-1 (Global Application Shell): complete
@@ -1050,14 +1069,12 @@ Separate from the product-phase track above; sequenced per `docs/UI_UX_IMPLEMENT
    shape to a "record this event" POST than 4B/4D's like/unlike pair; see
    the Phase 4A schema decision), per root `CLAUDE.md`'s `PLAN → IMPLEMENT →
    TEST → REVIEW → COMMIT` workflow.
-7. **Blocking, app-wide local-dev bug to fix before any further live browser
-   verification**: Next.js 16.2.9 in this environment 404s every route
-   shaped `[dynamicSegment]/(routeGroup)/page.tsx` — which is exactly
-   `/orgs/[orgslug]/(withmenu)/page.tsx`, so **every** org-scoped page is
-   currently unreachable in the local dev server (not specific to Shorts;
-   see the Phase 3F entry above for the isolation testing that pinned this
-   down). Confirmed unrelated to any app code change (clean `git diff` on
-   every file involved) and unrelated to the separate stray-lockfile fix
-   already applied. Needs a dedicated task: either find/pin a Next.js patch
-   version without the regression, or restructure `(withmenu)` relative to
-   `[orgslug]`.
+7. **RESOLVED (2026-08-19)** — the Next.js `[dynamicSegment]/(routeGroup)/page.tsx`
+   404 (was: every org-scoped page unreachable in the local dev server) and
+   the `tsconfig.json` `baseUrl` deprecation blocking `tsc --noEmit` are both
+   fixed. See the Status Snapshot entry above and `docs/ARCHITECTURE.md` §
+   "Repo-wide dev-environment blockers (fixed)" for the full fix and its
+   verification. Live browser verification is available again for future UI
+   work; re-verifying prior phases' previously-unverified UI (3F, 3G, 3H,
+   UI-1's mobile viewport, 4B, 4C, 4D) live is optional follow-up, not done
+   as part of this fix.

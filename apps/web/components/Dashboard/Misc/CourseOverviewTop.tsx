@@ -2,7 +2,7 @@
 import { useCourse, useCourseDispatch } from '@components/Contexts/CourseContext'
 import { Breadcrumbs } from '@components/Objects/Breadcrumbs/Breadcrumbs'
 import SaveState from './SaveState'
-import { CourseOverviewParams } from 'app/orgs/[orgslug]/dash/courses/course/[courseuuid]/[subpage]/page'
+import { CourseOverviewParams } from '@/app/orgs/[orgslug]/dash/courses/course/[courseuuid]/[subpage]/page'
 import { getUriWithOrg } from '@services/config/config'
 import { useOrg } from '@components/Contexts/OrgContext'
 import { getCourseThumbnailMediaDirectory } from '@services/media/media'
