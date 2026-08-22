@@ -45,6 +45,14 @@ from src.services.users.users import (
     update_user_password,
 )
 from src.services.courses.courses import get_user_courses
+from src.db.parent_child_links import ParentChildLinkRead
+from src.services.users.parent_links import (
+    list_my_parent_links,
+    list_pending_parent_links,
+    request_parent_link,
+    respond_to_parent_link,
+)
+from src.services.users.child_progress import ChildQuizProgressSummary, get_child_quiz_progress
 
 _get_redis_client = _get_redis_pool_client
 
@@ -806,4 +814,152 @@ async def api_get_user_courses(
         db_session=db_session,
         page=page,
         limit=limit,
+    )
+
+
+class ParentLinkRequest(BaseModel):
+    child_username: str
+
+
+class ParentLinkResponse(BaseModel):
+    approve: bool
+
+
+@router.post(
+    "/parent-links/request",
+    response_model=ParentChildLinkRead,
+    tags=["users"],
+    summary="Request a parent-child link",
+    description=(
+        "Request a link to a child account by username. Only accounts with "
+        "the `is_parent` flag enabled may call this (see the /{user_id} "
+        "profile update endpoint for setting it). Creates a PENDING request "
+        "the child must approve or reject; re-requesting after a rejection "
+        "reopens the same request rather than creating a duplicate."
+    ),
+    responses={
+        200: {"description": "Link request created or already pending.", "model": ParentChildLinkRead},
+        400: {"description": "Attempted to link an account to itself"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Caller does not have the parent flag enabled"},
+        404: {"description": "No user with that username"},
+    },
+)
+async def api_request_parent_link(
+    *,
+    db_session: AsyncSession = Depends(get_db_session),
+    current_user: PublicUser = Depends(get_current_user),
+    body: ParentLinkRequest,
+) -> ParentChildLinkRead:
+    link = await request_parent_link(
+        current_user=current_user, child_username=body.child_username, db_session=db_session
+    )
+    return ParentChildLinkRead.model_validate(link)
+
+
+@router.get(
+    "/parent-links/pending",
+    response_model=List[ParentChildLinkRead],
+    tags=["users"],
+    summary="List pending parent-link requests for the current user",
+    description="List PENDING parent-link requests directed at the current user as a child.",
+    responses={
+        200: {"description": "Pending link requests awaiting the caller's approval.", "model": List[ParentChildLinkRead]},
+        401: {"description": "Not authenticated"},
+    },
+)
+async def api_list_pending_parent_links(
+    *,
+    db_session: AsyncSession = Depends(get_db_session),
+    current_user: PublicUser = Depends(get_current_user),
+) -> List[ParentChildLinkRead]:
+    links = await list_pending_parent_links(current_user=current_user, db_session=db_session)
+    return [ParentChildLinkRead.model_validate(link) for link in links]
+
+
+@router.get(
+    "/parent-links/mine",
+    response_model=List[ParentChildLinkRead],
+    tags=["users"],
+    summary="List the current user's approved parent-child links",
+    description=(
+        "List APPROVED parent-child links the current user is party to, on "
+        "either side of the relationship."
+    ),
+    responses={
+        200: {"description": "Approved links involving the caller.", "model": List[ParentChildLinkRead]},
+        401: {"description": "Not authenticated"},
+    },
+)
+async def api_list_my_parent_links(
+    *,
+    db_session: AsyncSession = Depends(get_db_session),
+    current_user: PublicUser = Depends(get_current_user),
+) -> List[ParentChildLinkRead]:
+    links = await list_my_parent_links(current_user=current_user, db_session=db_session)
+    return [ParentChildLinkRead.model_validate(link) for link in links]
+
+
+@router.post(
+    "/parent-links/{link_uuid}/respond",
+    response_model=ParentChildLinkRead,
+    tags=["users"],
+    summary="Approve or reject a pending parent-link request",
+    description=(
+        "Approve or reject a PENDING parent-link request. Only the target "
+        "child may respond — the request is not visible to anyone else."
+    ),
+    responses={
+        200: {"description": "Link request updated.", "model": ParentChildLinkRead},
+        400: {"description": "Link request is no longer pending"},
+        401: {"description": "Not authenticated"},
+        404: {"description": "No such link request for this user"},
+    },
+)
+async def api_respond_to_parent_link(
+    *,
+    db_session: AsyncSession = Depends(get_db_session),
+    current_user: PublicUser = Depends(get_current_user),
+    link_uuid: str,
+    body: ParentLinkResponse,
+) -> ParentChildLinkRead:
+    link = await respond_to_parent_link(
+        current_user=current_user,
+        link_uuid=link_uuid,
+        approve=body.approve,
+        db_session=db_session,
+    )
+    return ParentChildLinkRead.model_validate(link)
+
+
+@router.get(
+    "/parent-links/children/{child_user_id}/quiz-progress",
+    response_model=List[ChildQuizProgressSummary],
+    tags=["users"],
+    summary="View a linked child's quiz progress",
+    description=(
+        "View a linked child's quiz activity across every channel — attempts "
+        "taken, best/most-recent graded score, and last-activity time, for "
+        "each quiz they've attempted. Requires an APPROVED parent-child link "
+        "from the caller (as parent) to the given child; quizzes never "
+        "attempted don't appear."
+    ),
+    responses={
+        200: {"description": "The child's quiz progress across all channels.", "model": List[ChildQuizProgressSummary]},
+        401: {"description": "Not authenticated"},
+        404: {"description": "No approved parent-child link to this child"},
+    },
+)
+async def api_get_child_quiz_progress(
+    *,
+    request: Request,
+    child_user_id: int,
+    db_session: AsyncSession = Depends(get_db_session),
+    current_user: PublicUser = Depends(get_current_user),
+) -> List[ChildQuizProgressSummary]:
+    return await get_child_quiz_progress(
+        request=request,
+        child_user_id=child_user_id,
+        current_user=current_user,
+        db_session=db_session,
     )

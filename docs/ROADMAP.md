@@ -6,16 +6,16 @@
 - [x] Install Docker
 - [x] Install Bun
 - [x] Get development environment running
-- [ ] Map relevant existing architecture
-- [ ] Establish LearnOrbit branding
+- [x] Map relevant existing architecture
+- [x] Establish LearnOrbit branding
 
 ## Phase 1 — Channels
-- [ ] Define channel model
-- [ ] Teacher/creator channel creation
-- [ ] School/institution channel creation
-- [ ] Channel profile/page
-- [ ] Follow/subscribe
-- [ ] Channel content listing
+- [x] Define channel model
+- [x] Teacher/creator channel creation
+- [x] School/institution channel creation
+- [x] Channel profile/page
+- [x] Follow/subscribe
+- [x] Channel content listing
 
 ## Phase 2 — Educational Video
 - [x] Video metadata
@@ -43,23 +43,23 @@
 - [x] Basic notifications
 
 ## Phase 5 — Academic Library
-- [ ] PDF resources
-- [ ] Past papers
-- [ ] Resource metadata
-- [ ] Resource search/filtering
-- [ ] Resource viewer/download flow
+- [x] PDF resources
+- [x] Past papers
+- [x] Resource metadata
+- [x] Resource search/filtering
+- [x] Resource viewer/download flow
 
 ## Phase 6 — Exams & Practice
-- [ ] Quizzes
-- [ ] Question bank
-- [ ] Exam practice
-- [ ] Results
-- [ ] Basic progress tracking
+- [x] Quizzes
+- [x] Question bank
+- [x] Exam practice
+- [x] Results
+- [x] Basic progress tracking
 
 ## Phase 7 — Parents
-- [ ] Parent account capability
-- [ ] Parent-child relationship
-- [ ] Basic learning activity view
+- [x] Parent account capability
+- [x] Parent-child relationship
+- [x] Basic learning activity view
 
 ## Phase 8 — Trust & Moderation
 - [ ] Reporting

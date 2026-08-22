@@ -1122,6 +1122,98 @@ class TestSecurityHelpers:
         assert update_exc.value.status_code == 400
 
 
+class TestIsParentField:
+    """Phase 7A: the self-service `is_parent` flag on User."""
+
+    @pytest.mark.asyncio
+    async def test_is_parent_defaults_false(self, mock_request, db, admin_user):
+        row = await db.get(User, admin_user.id)
+        assert row.is_parent is False
+
+    @pytest.mark.asyncio
+    async def test_self_update_sets_and_unsets_is_parent(
+        self, mock_request, db, admin_user
+    ):
+        with patch(
+            "src.services.users.users.authorization_verify_based_on_roles_and_authorship",
+            new_callable=AsyncMock,
+        ):
+            enabled = await update_user(
+                mock_request,
+                db,
+                admin_user.id,
+                admin_user,
+                UserUpdate(
+                    username="admin",
+                    first_name="Admin",
+                    last_name="User",
+                    email="admin@test.com",
+                    avatar_image="",
+                    bio="",
+                    details={},
+                    profile={},
+                    is_parent=True,
+                ),
+            )
+            assert enabled.is_parent is True
+            assert (await db.get(User, admin_user.id)).is_parent is True
+
+            disabled = await update_user(
+                mock_request,
+                db,
+                admin_user.id,
+                admin_user,
+                UserUpdate(
+                    username="admin",
+                    first_name="Admin",
+                    last_name="User",
+                    email="admin@test.com",
+                    avatar_image="",
+                    bio="",
+                    details={},
+                    profile={},
+                    is_parent=False,
+                ),
+            )
+            assert disabled.is_parent is False
+            assert (await db.get(User, admin_user.id)).is_parent is False
+
+    def test_is_parent_excluded_from_public_read_model(self):
+        assert "is_parent" not in UserReadPublic.model_fields
+
+    @pytest.mark.asyncio
+    async def test_other_user_cannot_set_is_parent(
+        self, mock_request, db, admin_user, regular_user
+    ):
+        """RBAC must reject a cross-user update the same way it already does
+        for any other field — is_parent introduces no new bypass."""
+        with patch(
+            "src.services.users.users.authorization_verify_based_on_roles_and_authorship",
+            new_callable=AsyncMock,
+            side_effect=HTTPException(status_code=403, detail="Forbidden"),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await update_user(
+                    mock_request,
+                    db,
+                    admin_user.id,
+                    regular_user,
+                    UserUpdate(
+                        username="admin",
+                        first_name="Admin",
+                        last_name="User",
+                        email="admin@test.com",
+                        avatar_image="",
+                        bio="",
+                        details={},
+                        profile={},
+                        is_parent=True,
+                    ),
+                )
+        assert exc_info.value.status_code == 403
+        assert (await db.get(User, admin_user.id)).is_parent is False
+
+
 class TestWelcomeCtaUrl:
     """The welcome email's "Get Started" link must land the user on an org."""
 

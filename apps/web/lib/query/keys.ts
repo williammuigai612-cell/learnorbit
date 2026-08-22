@@ -55,8 +55,93 @@ export const queryKeys = {
     share: (orgId: number, channelVideoId: number | string) =>
       ['channelVideo', orgId, channelVideoId, 'share'] as const,
   },
+  channelResources: {
+    detail: (orgId: number, channelResourceId: number | string) =>
+      ['channelResource', orgId, channelResourceId] as const,
+    // Phase 5C: mirrors channelVideos.list — an active filters object is
+    // appended to the key so each filter combination gets its own cache
+    // entry, while invalidating with just `list(orgId)` still catches every
+    // filtered variant too (invalidateQueries matches by key prefix).
+    list: (
+      orgId: number,
+      filters?: {
+        subject?: string
+        topic?: string
+        level?: string
+        institution_context?: string
+        resource_type?: string
+        year?: string
+      }
+    ) =>
+      filters && Object.keys(filters).length > 0
+        ? (['channelResource', orgId, 'list', filters] as const)
+        : (['channelResource', orgId, 'list'] as const),
+  },
+  questions: {
+    detail: (orgId: number, questionId: number | string) => ['question', orgId, questionId] as const,
+    // Phase 6E-1: mirrors channelResources.list — an active filters object is
+    // appended to the key so each filter combination gets its own cache
+    // entry, while invalidating with just `list(orgId)` still catches every
+    // filtered variant too (invalidateQueries matches by key prefix).
+    list: (
+      orgId: number,
+      filters?: {
+        subject?: string
+        topic?: string
+        level?: string
+        institution_context?: string
+        published?: boolean
+      }
+    ) =>
+      filters && Object.keys(filters).length > 0
+        ? (['question', orgId, 'list', filters] as const)
+        : (['question', orgId, 'list'] as const),
+  },
+  quizzes: {
+    detail: (orgId: number, quizId: number | string) => ['quiz', orgId, quizId] as const,
+    // Phase 6E-2: mirrors questions.list — an active filters object is
+    // appended to the key so each filter combination gets its own cache
+    // entry, while invalidating with just `list(orgId)` still catches every
+    // filtered variant too (invalidateQueries matches by key prefix).
+    list: (
+      orgId: number,
+      filters?: {
+        subject?: string
+        topic?: string
+        level?: string
+        institution_context?: string
+        quiz_type?: string
+      }
+    ) =>
+      filters && Object.keys(filters).length > 0
+        ? (['quiz', orgId, 'list', filters] as const)
+        : (['quiz', orgId, 'list'] as const),
+    // The attached-questions list for one quiz (Phase 6E-2's builder view) —
+    // scoped by quiz id, not by org, since a quiz id already uniquely
+    // identifies it (mirrors quizQuestions.list's own route shape).
+    questions: (orgId: number, quizId: number | string) =>
+      ['quiz', orgId, quizId, 'questions'] as const,
+  },
+  quizAttempts: {
+    // Phase 6E-3 — a single attempt, in progress or graded. Scoped by
+    // quiz_id + attempt_id, mirroring the backend's own route nesting
+    // (GET /orgs/{org_id}/quizzes/{quiz_id}/attempts/{attempt_id}).
+    detail: (orgId: number, quizId: number | string, attemptId: number | string) =>
+      ['quizAttempt', orgId, quizId, attemptId] as const,
+    // Phase 6G (Results) — the acting user's own attempt history for one
+    // quiz. Separate top-level key (not nested under `detail`'s prefix) so
+    // invalidating the list never has to know about individual attempt ids.
+    list: (orgId: number, quizId: number | string) =>
+      ['quizAttempt', 'list', orgId, quizId] as const,
+  },
   trail: {
     org: (orgId: number) => ['trail', 'org', orgId] as const,
+  },
+  quizProgress: {
+    // Phase 6H (Basic progress tracking) — the acting user's own
+    // attempted-quiz aggregates for one org. Mirrors quizAttempts.list's
+    // own shape (a single-user, single-org read).
+    org: (orgId: number) => ['quizProgress', orgId] as const,
   },
   shorts: {
     // Global, cross-org queue (Phase 3E) — one cache entry, no per-org/filter
@@ -74,6 +159,17 @@ export const queryKeys = {
     // (same rationale as feed.home: content is personal to the caller).
     list: (userId: number | undefined) => ['notifications', 'list', userId] as const,
     unreadCount: (userId: number | undefined) => ['notifications', 'unreadCount', userId] as const,
+  },
+  parentLinks: {
+    // Phase 7B-frontend — pending parent-link requests directed at the
+    // caller as a child. Global, cross-org, keyed by viewer (same rationale
+    // as notifications.list).
+    pending: (userId: number | undefined) => ['parentLinks', 'pending', userId] as const,
+    // Phase 7C — the caller's own APPROVED links, on either side.
+    mine: (userId: number | undefined) => ['parentLinks', 'mine', userId] as const,
+    // Phase 7C — a linked child's cross-org quiz progress.
+    childProgress: (childUserId: number | undefined) =>
+      ['parentLinks', 'childProgress', childUserId] as const,
   },
   folders: {
     list: (orgId: number) => ['folders', orgId] as const,

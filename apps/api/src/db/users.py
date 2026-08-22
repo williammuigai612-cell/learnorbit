@@ -21,6 +21,11 @@ class UserBase(SQLModel):
     details: Optional[dict] = Field(default_factory=dict, sa_column=Column(JSON))
     profile: Optional[dict] = Field(default_factory=dict, sa_column=Column(JSON))
     extra_metadata: Optional[dict] = Field(default=None, sa_column=Column(JSONB))
+    # Phase 7A: self-declared "this account is a parent" flag. No relationship
+    # or cross-user access is granted by this alone — see docs/ARCHITECTURE.md
+    # § "Parents (Phase 7A)". Deliberately excluded from UserReadPublic, which
+    # doesn't inherit UserBase.
+    is_parent: bool = False
 
 class UserCreate(UserBase):
     first_name: str = ""

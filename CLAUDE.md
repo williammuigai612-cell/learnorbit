@@ -19,35 +19,131 @@ Parent participation is planned, but should not expand V1 unnecessarily.
 ## Core Principle
 Reuse and extend existing LearnHouse functionality before creating new systems.
 
-## Development Rules
-- Inspect relevant existing code before modifying it.
-- Make the smallest change that satisfies the requirement.
-- Do not rewrite unrelated functionality.
-- Do not install packages unless clearly necessary.
-- Do not change the database schema without a clear requirement.
-- Prefer existing LearnHouse components, services, models and APIs.
-- Keep features modular and easy to test.
-- Run relevant tests/type checks after meaningful changes.
-- Do not make speculative refactors.
-- Do not change infrastructure unless required.
+## Automated Development Workflow
 
-## Token/Context Efficiency
-- Do not perform broad repository scans for small tasks.
-- Read only files relevant to the current task.
-- Keep responses concise: changed files, tests, issues, next step.
-- Do not repeatedly explain the whole architecture.
-- Use docs/PROGRESS.md as the project state.
-- Update documentation only when a meaningful decision or feature changes it.
-- Before implementing a feature, check whether LearnHouse already supports part of it.
+This section is the single authoritative process for every implementation session. It supersedes and consolidates the older Development Rules / Token efficiency / Git / Session Completion Protocol / Product Boundaries split — don't look for those headings elsewhere, everything they covered lives here now.
 
-## Git
+### 1. Session Start
+- Read `CLAUDE.md`.
+- Read only the relevant current section of `docs/PROGRESS.md`.
+- Check `git status` and recent commits.
+- Identify the current phase and smallest explicitly scoped increment.
+- Inspect only files directly relevant to that increment.
+- Before implementing a feature, check whether LearnHouse already supports part of it; prefer existing LearnHouse components, services, models, and APIs over new ones.
+- Do not reread the entire repository or unrelated documentation unless required.
+
+### 2. Scope Control & Phase Boundary
+The project's phase/increment plan (`docs/PROGRESS.md`, `docs/ROADMAP.md`) is authoritative. Treat the explicitly requested increment as the complete scope.
+
+Before implementation:
+- Identify dependencies and existing reusable patterns.
+- State the intended files and implementation boundaries when the task is ambiguous.
+- Do not silently begin the next phase/increment — not even when its dependencies happen to be available.
+- Do not add speculative features, unrelated V1 boundary features (see Product Boundaries below), or fix unrelated bugs unless explicitly requested.
+- Do not change the database schema, install packages, or introduce new infrastructure unless clearly necessary for this increment.
+
+When a requirement conflicts with existing architecture, stop and report the conflict before making a broad architectural change.
+
+When an increment is complete: mark it complete in `docs/PROGRESS.md` (§8), preserve the remaining documented sequence, identify the next recommended increment, and stop. Never implement multiple future increments in one pass just because their dependencies are ready.
+
+**Product Boundaries:** Do NOT add features simply because they exist in LearnHouse. Do NOT build an algorithmic recommendation system, monetization, live streaming, or advanced parental controls in V1 unless explicitly added to the roadmap.
+
+### 3. Implementation Workflow
+For each implementation increment use:
+
+**PLAN → RED → GREEN → REFACTOR → VERIFY → DOCUMENT**
+
+Where tests are appropriate:
+1. Write focused failing tests first.
+2. Implement the minimum change required.
+3. Make the tests pass.
+4. Refactor only when it improves correctness/maintainability without expanding scope.
+
+Reuse established patterns instead of creating parallel abstractions. Keep features modular and easy to test. Do not rewrite unrelated functionality.
+
+### 4. Security
+For every backend/client-server change:
+- Preserve existing authentication and authorization patterns.
+- Enforce authorization server-side; never trust client-provided user identity.
+- Reuse existing visibility/RBAC helpers (see `apps/api/src/security/`); check ownership where applicable.
+- Do not expose private/draft/unpublished data through new endpoints.
+- Include security/authorization tests for new mutation endpoints.
+- Do not weaken existing security controls merely to simplify implementation.
+
+### 5. Verification
+After implementation, automatically run the smallest relevant verification set. Depending on the files changed:
+- focused backend tests, focused frontend tests, relevant regression tests
+- Ruff for changed Python files; ESLint/`lint:strict` for changed frontend files
+- TypeScript checking when practical
+- `git diff --check`
+
+Run broader/full suites when the increment affects shared infrastructure or when the phase definition requires them. Do not spend tokens repeatedly running unrelated failing tests. Never claim a test, migration, browser check, or other verification was performed unless it actually ran. Report known pre-existing failures as such, not as failures caused by the current work.
+
+### 6. Browser Verification
+When UI changes are made:
+- Attempt live verification when the local environment permits it.
+- If a known pre-existing infrastructure/framework blocker prevents verification (e.g. the single-tenancy localhost limitation — see Multi-tenancy note below), do not modify unrelated infrastructure merely to bypass it.
+- Clearly record what was and was not verified; distinguish implementation correctness from unverified browser behavior.
+
+### 7. Scope Review
+Before finishing an increment, review `git diff`, `git status`, changed/new files, security-sensitive paths, tests, and documentation changes. Confirm no unrelated files or features were accidentally included. Use `git diff --stat` and `git diff --check` where useful.
+
+### 8. Automatic Documentation
+After a meaningful implementation increment, update `docs/PROGRESS.md` automatically before ending the session. Record concisely:
+- phase/increment
+- completed work
+- important files/features
+- tests and exact verification results
+- known limitations/blockers, deferred work
+- next recommended increment
+
+Update `docs/ARCHITECTURE.md` only when the implementation introduces or changes an architectural decision, API boundary, data model, security pattern, or reusable convention. Update `docs/ROADMAP.md` only when an actual roadmap milestone/status changes. Do not perform unrelated documentation cleanup — documentation is part of the implementation increment, not a separate pass. When updating docs, read only the relevant sections of the existing files.
+
+### 9. Session Completion Checklist
+Before declaring an increment complete, automatically verify:
+- [ ] Implementation complete, scope respected
+- [ ] Security reviewed
+- [ ] Relevant tests, lint, and type checks run
+- [ ] Browser verification attempted or limitation recorded
+- [ ] `git diff --check` clean
+- [ ] Documentation updated where required
+- [ ] Git status reviewed
+- [ ] No commit made unless explicitly requested
+
+If any applicable item cannot be completed, report it explicitly.
+
+### 10. Git Rules
 - Work on the `learnorbit-v1` branch unless explicitly instructed otherwise.
-- Make focused commits after meaningful features.
 - Do not reset, rebase, delete branches, or discard user changes without explicit permission.
+- Do not commit or push automatically. Only create a commit when the user explicitly requests it; only push when explicitly requested.
 
-## Product Boundaries
-Do NOT add unrelated features simply because they exist in LearnHouse.
-Do NOT build an algorithmic recommendation system, monetization, live streaming, or advanced parental controls in V1 unless explicitly added to the roadmap.
+When the user says `commit`, `commit all`, or equivalent:
+1. Review `git status` and the staged/unstaged diff.
+2. Ensure documentation for the completed increment is included where appropriate.
+3. Run `git diff --cached --check`.
+4. Create a focused commit with a conventional commit message.
+5. Verify the resulting `git status` and recent commit.
+6. Do not push unless explicitly requested.
+
+### 11. Token / Context Efficiency
+- Do not perform broad repository scans for small tasks; inspect only relevant files.
+- Prefer targeted searches over repository-wide searches.
+- Reuse known implementation patterns; do not reread files whose relevant contents are already known.
+- Do not repeat unchanged explanations or the whole architecture; do not run redundant tests.
+- Keep responses, plans, and reports concise: changed files, tests, issues, next step.
+- Avoid speculative investigation unrelated to the current increment.
+
+### 12. Final Report
+At the end of every meaningful implementation session, report:
+- **Completed** — concise implementation summary
+- **Files** — changed/created files
+- **Verification** — exact tests/checks and results
+- **Limitations** — anything not verified or pre-existing
+- **Documentation** — docs updated
+- **Git** — current status; explicitly state whether a commit was made
+- **Next** — the next smallest recommended increment
+
+Do not start the next increment automatically.
 
 ## Current Status
 See `docs/PROGRESS.md`.

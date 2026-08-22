@@ -300,7 +300,10 @@ added to the roadmap, detailed analytics/reporting dashboards.
 channel.
 
 **Main screens/components:** Content publishing flows (video, Shorts, resources), channel content
-management/listing (creator's own view), basic engagement summary (view/like/comment counts).
+management/listing (creator's own view), basic engagement summary (view/like/comment counts),
+question bank authoring and quiz authoring (question picker/attach/reorder) for Phase 6 — added by the
+Phase 6A/6D architecture decisions, which postdate this doc's original scope; see
+`docs/ARCHITECTURE.md` § "Exams & Practice (Phase 6A)".
 
 **Key UX requirements:**
 - Publishing flows must clearly show upload/processing state and validation errors (file type, size)

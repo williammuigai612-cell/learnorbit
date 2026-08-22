@@ -579,6 +579,483 @@ org was not verified this session (backend wasn't started). `bun test tests`: 11
 failures/1 error as before (`billing-internal-key.test.mjs`, `catalog-pagination.test.mjs`'s missing fixture, the `ar.json`
 timeout) — no regressions from either fix.
 
+### Academic Library (Phase 5A) — `ChannelResource` as a thin discovery layer over the existing `TYPE_DOCUMENT` Activity infrastructure; a dedicated container course, not the video one
+
+Investigated: `apps/api/src/db/channel_videos.py`, `apps/api/src/services/orgs/channel_videos.py` (Phase 2A/3A,
+above), `apps/api/src/services/courses/activities/pdf.py` (`create_documentpdf_activity`,
+`update_documentpdf_activity`), `apps/api/src/services/courses/activities/uploads/pdfs.py` (`upload_pdf`),
+`apps/api/src/security/file_validation.py` (`FILE_TYPES['document']`), `apps/api/src/routers/content_files.py`
+(`_check_content_access`), `apps/web/services/organizations/channelVideoUpload.ts`
+(`ensureChannelVideosContainer`), `apps/web/components/Objects/Activities/DocumentPdf/DocumentPdf.tsx`, and
+`docs/DESIGN_SYSTEM.md` §13 (Resource card).
+
+**1. `ChannelResource`, not a repurposed `ChannelVideo` or a new upload/storage pipeline.** LearnHouse already has
+a complete PDF pipeline — `ActivityTypeEnum.TYPE_DOCUMENT` / `ActivitySubTypeEnum.SUBTYPE_DOCUMENT_PDF`,
+`create_documentpdf_activity` (validates `content_type == "application/pdf"`, uploads via `upload_pdf` →
+`upload_content.upload_file`), and `security/file_validation.py`'s `document` type (500MB cap, `%PDF-` magic-byte
+check, SVG-block, server-derived safe extension) — but exactly like Phase 2A's video Activity, every piece of it
+is wired to `Activity.course_id` → `Chapter` → `Course` (`create_documentpdf_activity` requires a `chapter_id`
+and 404s without one). There is no course-less PDF in LearnHouse today, same finding as Phase 2A, so the same
+decision applies: add a thin discovery/metadata table rather than modify `Activity` or point `docs/PRD.md`'s
+channel-resource concept at `Course` directly.
+
+```
+Organization (channel)
+      │  org_id (FK, CASCADE)
+      ▼
+ChannelResource ── activity_id (FK, CASCADE, UNIQUE) ──▶  Activity (TYPE_DOCUMENT/SUBTYPE_DOCUMENT_PDF)
+                                                            →  existing upload/storage/validation (unchanged)
+```
+
+**Proposed `ChannelResource` schema** (not yet created — no migration, no model file written):
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `int`, PK | |
+| `channelresource_uuid` | `str`, indexed | Public identifier, matching `channelvideo_uuid`'s convention |
+| `org_id` | `int`, FK → `organization.id`, `ondelete="CASCADE"`, indexed | Channel ownership, stored directly — same reasoning as `ChannelVideo.org_id` |
+| `activity_id` | `int`, FK → `activity.id`, `ondelete="CASCADE"`, **unique**, indexed | The underlying PDF's storage/validation record. One `ChannelResource` per `Activity` (1:1), referenced by integer `id` per the existing convention (see Phase 2A Findings — `activity_uuid` is not unique-constrained) |
+| `title` | `str` | |
+| `description` | `str \| None` | |
+| `published` | `bool`, default `False` | Draft vs. live — same convention as `ChannelVideo.published` |
+| `visibility` | `str`, default `"public"` | Plain growable string, same convention as `ChannelVideo.visibility` (`"public"` \| `"unlisted"`) |
+| `creation_date` | `str` | `str(datetime.now())` convention, matching `ChannelVideo` |
+| `update_date` | `str` | |
+| `subject` | `str \| None` | Flexible free-text, per `docs/PRD.md` §4 — same convention as `ChannelVideo.subject` |
+| `topic` | `str \| None` | Same |
+| `level` | `str \| None` | Class/grade/course level |
+| `institution_context` | `str \| None` | Curriculum/institution context |
+| `resource_type` | `str \| None` | Free-text category — e.g. `"past_paper"`, `"notes"`, `"revision_guide"`, `"marking_scheme"`. Not an enum, same reasoning as `ChannelVideo.resource_type`: a marking scheme is treated as a tagged `ChannelResource` like any other, not a separate linked entity — revisit only if a real "paper ↔ its scheme" relationship is requested |
+| `year` | `str \| None` | New field, not present on `ChannelVideo`. A past paper without an exam year/session is close to unusable for exam prep, and `docs/ROADMAP.md` Phase 5 explicitly lists "Past papers" as an increment. Kept as free text (not `int`), matching every other academic-metadata column's non-enum convention, since exam sessions aren't always a bare year (e.g. "2023", "Nov 2023 P1") |
+
+**No `thumbnail_image` column.** `docs/DESIGN_SYSTEM.md` §13's Resource card spec is icon/badge-driven ("file-type
+icon/badge (PDF, past paper, etc.) → title → metadata chips"), not thumbnail-driven like the Video/Short card —
+the design system itself doesn't call for one, so it isn't added speculatively (compare Phase 2G-4, which
+deferred `ChannelVideo.thumbnail_image` upload even though the column already existed).
+
+**No `file_type`/format column.** V1 scope is PDF only (`docs/PRD.md` §3 items 11–12: "PDFs and academic
+resources," "Past papers"); the format is already fully carried by the underlying `Activity`'s
+`activity_sub_type`. If a second format is added later, the precedent to follow is `ChannelVideo.content_format`
+(Phase 3A) — a plain growable string column, added only when a second real format actually ships, not before.
+
+**2. Dedicated "Channel Resources" container course — not a shared container with Channel Videos.** Phase 2F/3A
+established a lazily-created, hidden, `public+published` container course per channel (`CONTAINER_COURSE_NAME =
+"Channel Videos"`, marked via `extra_metadata.learnorbit_channel_container`) so a channel video isn't forced to
+surface course/chapter picking to the creator. The same trick is needed for PDFs (`create_documentpdf_activity`
+also requires a `chapter_id`), but resources get their **own** container course rather than reusing the video
+one:
+- The existing container is named and labeled "Channel Videos" (`CONTAINER_COURSE_NAME`) — if an org admin ever
+  encounters it in their dashboard's course list (it's hidden from public browsing but not literally
+  unreachable), a shared container mislabels every PDF inside it as a "video" course. A distinct "Channel
+  Resources" container avoids that.
+- The two content types have independent lifecycles and independent single-marker lookups
+  (`ensureChannelVideosContainer` finds "the" container by one boolean marker per org); overloading one marker
+  for two unrelated content types would require branching that lookup by content type anyway, which is exactly
+  as much code as a second, parallel container helper.
+- The existing container-creation code already documents its own race condition (two simultaneous first-uploads
+  can create duplicate containers) as an accepted, low-cost V1 limitation — confirming that a second, near-identical
+  container helper is consistent with, not a departure from, the level of rigor already accepted here.
+- **Decision**: add `ensureChannelResourcesContainer` (mirrors `ensureChannelVideosContainer` exactly) with
+  `CONTAINER_COURSE_NAME = "Channel Resources"`, `CONTAINER_CHAPTER_NAME = "Resources"`, marker key
+  `learnorbit_resource_container` (distinct from `learnorbit_channel_container`). Same `public: true`,
+  `published: true` course settings, for the same reason: `content_files.py`'s course-based access check is what
+  ultimately gates the file, and it only branches on `course.public`, not on any content-type distinction.
+
+**3. Creation flow reuses `create_documentpdf_activity` unchanged, mirroring Phase 2F's video flow.**
+`ensureChannelResourcesContainer` → `create_documentpdf_activity(chapter_id, pdf_file, ...)` (existing, unmodified;
+validates `application/pdf`, uploads via `upload_pdf`) → `updateActivity({ published: true }, ...)` (same
+unconditional-publish reasoning as video: `Activity.published` carries no independent meaning once wrapped by a
+`ChannelResource`, whose own `published`/`visibility` are the real, single source of truth) → `create_channel_resource`
+(new service function, mirrors `create_channel_video`: validates the `Activity` belongs to this org and is
+`TYPE_DOCUMENT`, 404s identically for not-found vs. wrong-org per the existing anti-enumeration pattern, 409s if
+already posted). No new upload code, no new validation code — only new orchestration, one level up.
+
+**4. File serving needs no `content_files.py` changes.** A `ChannelResource`'s PDF lives at
+`orgs/{org_uuid}/courses/{container_course_uuid}/activities/{activity_uuid}/documentpdf/...` — the exact path
+shape `_check_content_access` already recognizes and gates via `course.public` (the `courses`/`activities` branch,
+`content_files.py:169-200`). No new path pattern, no new access-control branch.
+
+**5. Viewing reuses `DocumentPdf.tsx` unchanged.** The existing PDF-activity viewer is already a generic
+`<iframe>` over `getActivityMediaDirectory(orgUuid, courseUuid, activityUuid, filename, 'documentpdf')` — it
+takes no course-specific behavior beyond those four identifiers, all of which a `ChannelResource` row (joined to
+its `Activity`) already has. A resource detail page needs to pass it the container course's uuid instead of a
+curriculum course's — no component change.
+
+**6. Visibility/security rules (unchanged from Phase 2C/3A, restated for resources):**
+- Draft (`published = False`) and `unlisted` resources are excluded from listing by the same
+  `published == True AND visibility == "public"` predicate as `ChannelVideo`; the channel's own owner/admins see
+  everything, reusing `_require_channel_admin`/`is_org_admin` unchanged.
+- **Inherited limitation, not new**: because the container course is always `public: true`, `content_files.py`
+  permits an anonymous direct fetch of any file inside it by URL, independent of the owning `ChannelResource`'s
+  own `published`/`visibility` state — identical to the accepted Phase 2A/3A trade-off for videos.
+  `ChannelResourceRead` must not expose the underlying storage path/filename directly (same rule already applied
+  to `ChannelVideoRead`), so the only way to reach an unpublished file is guessing/knowing its `activity_uuid` —
+  not solved here, carried over as-is.
+- Audit logging: no existing precedent found for `ChannelVideo` create/publish/delete going through
+  `audit_logs` — confirms this is not yet a project convention for channel content, so Phase 5B should not
+  invent one unilaterally for resources; if the user wants audit logging added, it should cover both content
+  types together as its own increment, not be introduced asymmetrically here.
+
+**Deletion/cascade implications**: identical reasoning to Phase 2A — `org_id`'s own `ondelete="CASCADE"` removes
+the `ChannelResource` row directly when the channel is deleted (belt-and-suspenders alongside the `Course` →
+`Activity` cascade path); `activity_id`'s `ondelete="CASCADE"` guarantees no orphaned `ChannelResource` can point
+at a deleted `Activity`. Deleting only the `ChannelResource` row (unpublishing/removing a channel post) does not
+cascade to the underlying `Activity`/container-course lesson.
+
+**Explicitly deferred (not part of 5A, tracked for 5B onward):** the actual model file, Alembic migration,
+service/router layer, frontend upload flow, resource card/listing/detail UI, and subject/topic/level/resource_type/year
+filtering endpoint — see `docs/PROGRESS.md` for the increment breakdown. Global cross-channel resource discovery,
+full-text search, and resource-level likes/comments/saves are out of scope for Phase 5 entirely (no ROADMAP item,
+no PRD signal); Phase 4's engagement tables are direct-FK-per-content-type with no polymorphism, so adding
+resource engagement later is a parallel `ChannelResourceLike`/`ChannelResourceSave` pattern, not a schema change
+to this table.
+
+### Exams & Practice (Phase 6A) — new `Question`/`Quiz` domain, not a repurposed `Assignment`; a real cross-quiz question bank and a distinct timed Exam Practice mode
+
+Investigated: `apps/api/src/db/courses/assignments.py` (`Assignment`/`AssignmentTask`/`AssignmentTaskSubmission`/
+`AssignmentUserSubmission`), `apps/api/src/routers/courses/assignments.py` (full CRUD/grading router already
+mounted), `apps/web/app/orgs/[orgslug]/dash/assignments/[assignmentuuid]/**` (existing teacher authoring +
+grading UI, including a `QUIZ` task type), `apps/web/components/Objects/Activities/Assignment/
+AssignmentStudentActivity.tsx` (existing student-taking UI), `apps/api/src/db/channel_resources.py` +
+`apps/api/src/services/orgs/channel_resources.py` (Phase 5B — the closest structural precedent: a channel-scoped
+discovery/metadata table with `_require_channel_admin` RBAC and a published+visibility predicate), and
+`apps/api/src/db/trail_runs.py` (existing per-user course-completion tracking — `TrailRun`/`TrailStep`, unrelated
+to assignments).
+
+**Scope confirmed with the user before this decision** (two roadmap items were ambiguous enough to be
+consequential — see `CLAUDE.md`'s "stop and ask" rule): "Question bank" means a **real, reusable pool of
+questions** tagged by subject/topic/level that can be pulled into more than one quiz, not just a quiz's own
+private question list. "Exam practice" means a **distinct timed practice-session experience** that can mix
+questions pulled from across the bank/multiple quizzes into one timed attempt with a single combined score, not
+just a relabeled quiz.
+
+**1. `Question`/`Quiz`, not a repurposed `Assignment`.** LearnHouse's `Assignment` stack is a complete, working
+quiz engine on paper (`AssignmentTaskTypeEnum.QUIZ`, grading, retries, `show_correct_answers`) with a full
+authoring + student-taking UI already shipped — reusing it was the default instinct. It does not fit the
+confirmed scope, though, for two structural reasons, not preference:
+- **`AssignmentTask` has no cross-assignment identity.** Every task row belongs to exactly one `Assignment`
+  (`assignment_id` FK, no other owner), and the entire grading/retry/`AssignmentUserSubmission` pipeline is built
+  around "one assignment, graded as a whole." Making a task reusable across assignments — the entire point of
+  "Question bank" as scoped — would mean either duplicating each question's row per quiz it's used in (defeats
+  "reusable": editing a question wouldn't propagate) or restructuring `AssignmentTask`'s ownership model into a
+  many-to-many shape, which risks regressing the existing, already-shipped teacher-facing assignment/grading
+  product for a requirement (channel-level exam-prep quizzes) that product was never designed for.
+- **`Assignment` is hard-wired to `Course`/`Chapter`/`Activity`** (`org_id`/`course_id`/`chapter_id`/`activity_id`
+  all required, non-nullable). Phase 2A/5A already hit this exact wall for videos and PDFs and solved it with a
+  lazily-created hidden container course per channel. A third container-course workaround would be reasonable for
+  a single "Quiz as Activity," but the Exam Practice requirement — pull questions from multiple quizzes/subjects
+  into one timed session — has no `Activity` shape at all; an exam-practice attempt isn't "one Activity," it's a
+  cross-cutting query over the question bank. Bending `Assignment` to fit would cost more code than a small,
+  purpose-built domain.
+- Decision: add a new, purpose-built `Question`/`Quiz` domain, channel-scoped exactly like `ChannelVideo`/
+  `ChannelResource` (`org_id` FK, `_require_channel_admin` RBAC, published+visibility predicate for public
+  listing) — but **not** a thin wrapper over an existing `Activity`, because there is no existing quiz-taking
+  infrastructure this domain can delegate its actual behavior (grading, timing, attempt history) to without the
+  restructuring above. This is a deliberate departure from the Phase 2A/5A "thin discovery layer over `Activity`"
+  pattern, made explicit here rather than silently copied where it doesn't fit.
+
+```
+Organization (channel)
+      │  org_id (FK, CASCADE)
+      ├──────────────► Question (bank item: prompt, contents, subject/topic/level, published)
+      │                     ▲
+      │                     │ question_id (FK, CASCADE)
+      └──────────────► Quiz ── QuizQuestion (join: quiz_id, question_id, order) ──► Question
+                          │  quiz_type: "standard" | "exam_practice", time_limit_minutes
+                          │
+                          ▼
+                    QuizAttempt (user_id, status, score_percentage, started_at, submitted_at)
+                          │
+                          ▼
+                    QuizAnswer (quizattempt_id, question_id, answer, is_correct)
+```
+
+**Proposed schema** (not yet created — no migration, no model file written; 6B implements `Question` only, see
+below):
+
+`Question` — the bank item, channel-scoped, reusable across quizzes:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `int`, PK | |
+| `question_uuid` | `str`, indexed | Public identifier, matching `channelresource_uuid`'s convention |
+| `org_id` | `int`, FK → `organization.id`, `ondelete="CASCADE"`, indexed | Channel ownership — bank items are not shared cross-channel, same as every other channel content type |
+| `question_type` | `str` | Plain growable string (`"multiple_choice"` \| `"short_answer"` \| `"number_answer"`), same convention as `ChannelVideo.content_format`/`ChannelResource.resource_type` — not a DB enum, so a new auto-gradable type doesn't need a migration |
+| `prompt` | `str` | The question text |
+| `contents` | `Dict`, JSON column | Type-specific payload: `{"options": [{"id", "text", "is_correct"}, ...]}` for `multiple_choice`, `{"accepted_answers": [...]}` for `short_answer`/`number_answer`. Mirrors `AssignmentTaskBase.contents`'s proven polymorphic-JSON convention rather than inventing per-type columns |
+| `explanation` | `str \| None` | Shown only after an attempt is graded (see visibility rules below) |
+| `subject` / `topic` / `level` / `institution_context` | `str \| None` | Same free-text convention as `ChannelResource` |
+| `published` | `bool`, default `False` | Draft questions are excluded from the quiz-authoring picker and can never be attached to a quiz; same admin-only draft/live convention as every other channel content type |
+| `creation_date` / `update_date` | `str` | `str(datetime.now())` convention, matching `ChannelResource` |
+
+No `resource_type`/`year` fields (that vocabulary belongs to Phase 5's document resources, not quiz questions).
+No per-question point-weight column — V1 scores every question equally (1 point); a weighting column is a
+speculative addition with no current requirement, following the "don't design for hypothetical future
+requirements" rule.
+
+`Quiz` — the channel-facing container a student actually opens:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `int`, PK | |
+| `quiz_uuid` | `str`, indexed | |
+| `org_id` | `int`, FK → `organization.id`, `ondelete="CASCADE"`, indexed | |
+| `title` / `description` | `str` / `str \| None` | |
+| `quiz_type` | `str`, default `"standard"` | `"standard"` \| `"exam_practice"` — same plain-string discriminator convention as `ChannelVideo.content_format` (Phase 3A). One entity for both roadmap items rather than two near-identical tables: an exam-practice quiz is a `Quiz` whose `QuizQuestion` set was deliberately assembled across subjects/topics from the bank and which carries a `time_limit_minutes` — no separate orchestration entity needed |
+| `time_limit_minutes` | `int \| None` | Primarily set for `exam_practice`, but not restricted to it |
+| `subject` / `topic` / `level` / `institution_context` | `str \| None` | Quiz-level classification for channel discovery/filtering cards, same convention as `ChannelVideo`/`ChannelResource` — individual questions may vary (especially for `exam_practice`), this is the card-level tag |
+| `pass_threshold_percentage` | `float \| None` | Mirrors `Assignment.pass_threshold_percentage`'s nullable-default convention |
+| `published` | `bool`, default `False` | |
+| `visibility` | `str`, default `"public"` | Same `"public"` \| `"unlisted"` convention as `ChannelVideo`/`ChannelResource` |
+| `creation_date` / `update_date` | `str` | |
+
+`QuizQuestion` — ordered join, the only place a `Question`'s bank membership in a given `Quiz` is recorded:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `int`, PK | |
+| `quiz_id` | `int`, FK → `quiz.id`, `ondelete="CASCADE"`, indexed | |
+| `question_id` | `int`, FK → `question.id`, `ondelete="CASCADE"`, indexed | |
+| `order` | `int` | Display order within the quiz |
+| — | `UniqueConstraint(quiz_id, question_id)` | A question can't be added to the same quiz twice |
+
+`QuizAttempt` — one row per attempt, **not** reset-in-place like `AssignmentUserSubmission`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `int`, PK | |
+| `quizattempt_uuid` | `str`, indexed | |
+| `quiz_id` | `int`, FK → `quiz.id`, `ondelete="CASCADE"`, indexed | |
+| `user_id` | `int`, FK → `user.id`, `ondelete="CASCADE"`, indexed | |
+| `status` | `str` | `"in_progress"` \| `"submitted"` \| `"graded"` — simplified vs. `AssignmentUserSubmissionStatus` (no `LATE`/`NOT_SUBMITTED`: quizzes have no due date in V1) |
+| `score_percentage` | `float`, default `0.0` | |
+| `attempt_number` | `int`, default `1` | |
+| `started_at` / `submitted_at` | `str` / `str \| None` | |
+
+Deliberate departure from `AssignmentUserSubmission`'s unique-per-`(user, assignment)` reset-in-place pattern:
+`QuizAttempt` has **no** unique constraint on `(user_id, quiz_id)` — every attempt is its own row. Roadmap items
+"Results" and "Basic progress tracking" both need attempt *history* (score over time, most recent vs. best
+attempt), which a reset-in-place row structurally cannot provide. This is the same trade-off Phase 4A already
+made explicitly for `ChannelVideoShare` (append-only log, no uniqueness) vs. `ChannelVideoLike` (toggle, unique)
+— the shape follows what the data is for, not a blanket copy of one precedent.
+
+`QuizAnswer` — one row per `(attempt, question)`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `int`, PK | |
+| `quizattempt_id` | `int`, FK → `quizattempt.id`, `ondelete="CASCADE"`, indexed | |
+| `question_id` | `int`, FK → `question.id`, `ondelete="CASCADE"`, indexed | |
+| `answer` | `Dict`, JSON column | Mirrors `AssignmentTaskSubmission.task_submission`'s convention |
+| `is_correct` | `bool`, default `False` | Computed at submit time by auto-grading (all three V1 question types are auto-gradable — no manual grading path, unlike `Assignment`) |
+| — | `UniqueConstraint(quizattempt_id, question_id)` | |
+
+**2. RBAC and visibility — reuses the Phase 5B pattern exactly, extended with an attempt-time gate.**
+- `Question`/`Quiz` create/update/publish/delete: `_require_channel_admin` (unchanged import from
+  `channel_resources.py`'s pattern), scoped to `org_id` — a `Quiz`'s `QuizQuestion` rows may only reference
+  `Question`s already belonging to that same `org_id` (404 on cross-org `question_id`, identical anti-enumeration
+  shape to Phase 5B's cross-org `activity_id` check).
+- `Quiz` listing/get: public/anonymous viewers see `published == True AND visibility == "public"` only; the
+  channel's own admins see everything (drafts, unlisted) — identical predicate to `ChannelResource`.
+  `Question` bank items are **never** listed to non-admins directly (there is no public "browse the question
+  bank" surface in the confirmed scope) — only reachable indirectly through a published `Quiz`'s questions, and
+  even then with `contents`'s correct-answer data and `explanation` stripped (see below).
+- Taking a quiz (`QuizAttempt` start/submit): any authenticated user, same auth-required-no-role-check convention
+  as Like/Save/Comment (Phase 4B/4C/4D) — 401 for anonymous. The channel's own admin may attempt their own draft
+  quiz (preview), same "owner-can-X-own-draft" precedent already established for videos/resources.
+  `is_org_admin` is still checked once per attempt-start, not cached client-side.
+- **Correct-answer/explanation leak prevention (new gate, no existing precedent to reuse — closest analogue is
+  `Assignment.show_correct_answers`):** the question-serialization path used while a quiz is in progress
+  (fetching questions to render, or any state before that specific `QuizAttempt` is `"graded"`) must strip
+  `is_correct` from each `contents.options` entry and omit `explanation` entirely. Only the post-submit grading
+  response (per-answer `is_correct`, and the full `Question` including `explanation`) reveals them, and only for
+  that user's own attempt. This is stricter than `Assignment`'s opt-in `show_correct_answers` flag — there is no
+  "leave it hidden forever" mode needed in the confirmed scope, so no extra toggle is added.
+
+**3. "Basic progress tracking" — aggregation over `QuizAttempt`, not a new table.** LearnHouse's existing
+`TrailRun`/`TrailStep` (`apps/api/src/db/trail_runs.py`) tracks *course* completion and has no notion of a quiz
+attempt or a score — confirmed unrelated, not reusable here. A per-user progress view (attempts taken, best/most
+recent score per quiz, completion over time) is a read-only query over `QuizAttempt`/`QuizAnswer`, deferred to
+its own increment (tracked below) rather than a new persisted table — there is nothing here that isn't already
+derivable from the attempt history once it exists.
+
+**4. No new container course, no `Activity` involvement at all.** Unlike Phases 2A/5A, nothing in this domain
+uploads a file or needs `content_files.py`'s access-control path — a `Question`'s `contents` is plain JSON on the
+row itself. This is the reason a from-scratch domain is cheaper here than another `Activity`-wrapping layer would
+have been.
+
+**Explicitly deferred (not part of 6A, tracked for 6B onward — see `docs/PROGRESS.md` for the increment
+breakdown):** all model files, migrations, service/router layers, and every frontend surface (bank authoring,
+quiz authoring/question-picker, student quiz-taking, exam-practice timer UI, results view, progress view). 6B
+implements `Question` (the bank) end-to-end first, since `Quiz`/`QuizQuestion` depend on it existing; `Quiz`
+authoring, then attempt-taking/grading, then the exam-practice timer mode, then Results, then progress tracking
+follow as separate increments in that dependency order. Cross-channel question sharing, AI-assisted question
+generation (LearnHouse already has `routers/ai/assignment_gen.py` as a precedent to revisit if this is wanted
+later, not evaluated here), and manual/partial-credit grading are out of scope for Phase 6 entirely (no ROADMAP
+item, no PRD signal, and the confirmed scope is auto-gradable question types only).
+
+### Exams & Practice (Phase 6D) — QuizAttempt/QuizAnswer, attempt-taking + auto-grading
+
+Implements the `QuizAttempt`/`QuizAnswer` tables exactly as spec'd in the 6A decision above
+(`apps/api/src/db/quiz_attempts.py`, `apps/api/src/services/orgs/quiz_attempts.py`), plus the two concrete
+decisions the 6A spec left open: the per-question-type answer JSON shape, and one correction to the leak-
+prevention gate's stated scope.
+
+**1. Answer JSON contract** (`QuizAnswer.answer`, submitted per question in `QuizAttemptSubmit.answers`):
+
+| `question_type` | Submitted `answer` shape | Grading rule |
+|---|---|---|
+| `multiple_choice` | `{"selected_option_id": <id>}` | Correct iff `selected_option_id` is in the set of `contents.options` entries with `is_correct: true` — supports questions with more than one correct option without extra schema, since selecting any one of them grades correct |
+| `short_answer` | `{"text": <string>}` | Case-insensitive, trimmed match against any entry in `contents.accepted_answers` |
+| `number_answer` | `{"value": <number>}` | Float-equality match against any entry in `contents.accepted_answers` (both sides coerced via `float()`) |
+
+A question with no submitted answer, an unparseable value, or an unrecognized `question_type` is graded
+`is_correct: false` — there is no partial credit or manual-override path in V1 (see 6A's explicit scope note
+above).
+
+**2. Leak-prevention gate, extended:** the 6A decision's stated rule ("strip `is_correct` from each
+`contents.options` entry and omit `explanation`") described the `multiple_choice` case, where the option *text*
+is meant to stay visible. It under-specified `short_answer`/`number_answer`: for those types, `contents.
+accepted_answers` **is** the entire answer key, not just a flag on visible content — so `_strip_question` in
+`quiz_attempts.py` removes that key wholesale, in addition to stripping `options[].is_correct` and omitting
+`explanation`. Applied identically in the student-view question list on `start_quiz_attempt` and on
+`get_quiz_attempt` while `status != "graded"`. The gate lifts only in `submit_quiz_attempt`'s response and a
+subsequent `get_quiz_attempt` once `status == "graded"`, and only for that attempt's own user (ownership enforced
+by comparing `QuizAttempt.user_id` to the acting user — 403, not 404, on mismatch, since the attempt's existence
+isn't itself sensitive to its owner's peers the way cross-org content is).
+
+**3. `attempt_number` and status transitions.** `attempt_number` is computed at `start_quiz_attempt` time as
+`count(existing attempts by this user for this quiz) + 1` — no separate counter column, consistent with 6A's
+"every attempt is its own row" design for Results (6G)/progress tracking (6H). Because all V1 question types are
+auto-gradable (6A), `submit_quiz_attempt` moves `status` directly from `"in_progress"` to `"graded"` in one
+transaction — the `"submitted"` status value from 6A's schema is reserved for a manual-grading path that doesn't
+exist in V1, so it's never actually written by this increment.
+
+### Parents (Phase 7A) — `is_parent` as a plain boolean column on `User`, not a global `Role`
+
+No global account-type/persona concept existed on `User` before this — `Role`/`RoleTypeEnum` (`db/roles.py`) is
+per-organization (ADMIN/INSTRUCTOR/etc.), and `TYPE_GLOBAL` roles are a fixed, admin-managed set seeded in
+`services/setup/setup.py`, not something a user can self-assign. "Parent account capability" needs to be
+self-service and global (a parent isn't scoped to one channel/org), so it's a new `is_parent: bool = False`
+field on `UserBase` (`apps/api/src/db/users.py`) instead — it lands on `User` (table), `UserCreate`, `UserUpdate`,
+and `UserRead` automatically, and is deliberately **not** added to `UserReadPublic`, which doesn't inherit
+`UserBase` and is what other users see when looking someone up (no reason yet for a parent flag to be visible to
+anyone but the account holder).
+
+No new endpoint: the existing `PUT /users/{user_id}` → `update_user()` (`services/users/users.py:523`) already
+does a generic `model_dump(exclude_unset=True)` set-attr loop gated by a `_PROTECTED_FIELDS` denylist and existing
+RBAC (`rbac_check` — self-update always allowed via the `user_uuid` match, cross-user update requires the existing
+roles/authorship check). `is_parent` was deliberately left off `_PROTECTED_FIELDS` since it's meant to be
+self-settable, the same way `bio`/`avatar_image` are.
+
+Setting the flag alone grants no new access — it carries no relationship and no cross-user visibility. That's
+7B (parent-child relationship, decided as a child-approves-parent's-request flow, modeled on
+`OrganizationFollow`'s join-table pattern but consent-gated) and 7C (activity view, likely extending 6H's
+per-org `get_org_quiz_progress` with an authorized target-user parameter). 7B's backend is now built (below);
+7C is not.
+
+### Parents (Phase 7B, backend) — `parentchildlink` join table with a status enum, not a reused `Notification`
+
+The relationship table (`apps/api/src/db/parent_child_links.py`) follows `OrganizationFollow`'s shape — `id`,
+an FK pair (`parent_user_id`/`child_user_id` → `user.id`, CASCADE), a `*_uuid`, dates — with a
+`UniqueConstraint(parent_user_id, child_user_id)` so a pair has exactly one row, ever; re-requesting after a
+rejection flips that row back to `PENDING` rather than accumulating duplicates. Unlike `OrganizationFollow`
+(a bare boolean follow/unfollow), this relationship needs an intermediate consent state, so it takes
+`ResourceAuthor`'s status-enum convention instead: `ParentChildLinkStatusEnum` (`PENDING`/`APPROVED`/
+`REJECTED`), stored as a native Postgres enum type (`parentchildlinkstatusenum`) to match how
+`resourceauthorshipstatusenum` is done, not a plain string column — SQLModel's own `create_all` (used by the
+local dev bootstrap and by tests) generates a native enum for a Python `Enum` field by default, so a
+hand-written migration using `sa.String()` here would silently diverge from what the ORM actually produces.
+
+**Child identification**: the parent supplies the child's **username**, not email — a decision made explicitly
+to reuse the existing enumeration-protection convention (`read_user_by_username`'s generic-404,
+auth-required lookup, `routers/users.py`) rather than inventing new email-lookup logic with its own exposure
+surface. `request_parent_link` 404s with a generic message ("Resource not found") on an unknown username, the
+same wording `read_user_by_username` uses, so the two code paths can't be distinguished by response shape.
+
+**Why not the existing `Notification` table**: `db/notifications.py`'s `Notification` has a hard, non-nullable
+FK to `channelvideo_id` — deliberately single-purpose, no polymorphic `content_type`/`content_id` association
+(see § "Basic Notifications (Phase 4H)" above). A parent-link request has no `ChannelVideo`, so reusing it would
+require either loosening that FK to nullable or adding a second nullable FK — itself an architecture change
+bigger than this increment's scope. Instead, discovery is poll-based: `GET /users/parent-links/pending` lists
+PENDING requests where the caller is the child. A push notification integration is left as a clearly separate,
+optional future addition, not folded into 7B.
+
+**Endpoints live on `/users`, not `/orgs/{org_id}`**: this relationship is user-to-user and global, the same
+reason `is_parent` (7A) is a plain `User` column rather than anything org-scoped. Three new endpoints on the
+existing `routers/users.py`: `POST /parent-links/request`, `GET /parent-links/pending`, `POST
+/parent-links/{link_uuid}/respond`.
+
+**IDOR guard on respond**: `respond_to_parent_link` 404s (not 403) when the caller isn't the link's
+`child_user_id` — including when the caller is the *parent* who created the request — so a caller can't use the
+status code to distinguish "this link isn't yours" from "this link doesn't exist." Matches the existing
+`_get_own_notification_or_404` pattern in `services/notifications/notifications.py`.
+
+**Scope decision**: per-user request (this session), 7B ships backend-only, mirroring 7A — no settings-page UI
+yet for either the `is_parent` toggle or the request/approve flow. `docs/PROGRESS.md` item 13 has the full
+implementation/verification record, including a dev-environment gotcha: the local `uvicorn --reload` process
+calls `SQLModel.metadata.create_all` on every reload (`src/core/events/database.py::_bootstrap_schema`), which
+creates missing *tables* but not missing *columns* — worth knowing before running live `alembic
+upgrade`/`downgrade` testing against a dev DB that reload process is also touching.
+
+### Two personal-account-settings surfaces exist — the org-scoped one is the live one in this deployment
+
+`apps/web/app` has two separate "manage your own account" implementations, and it matters which one a new
+settings UI is added to:
+
+- **`app/(hub)/account/page.tsx`** — a full-screen, non-org-scoped page (`AccountGeneral`/`AccountSecurity`/
+  a danger zone). Its `(hub)/layout.tsx` gates it to SaaS: `if (mode === 'oss' || mode === 'ee') notFound()`.
+  Inherited from upstream LearnHouse's cloud offering (billing/org-lifecycle hub).
+- **`app/orgs/(withmenu)/[orgslug]/account/[subpage]/page.tsx`** — org-scoped, server-rendered, backed by
+  `AccountClient`/`AccountSidebar`/`AccountActionsMobile` with subpages `general`/`profile`/`security`/
+  `purchases`. This is what actually renders when a browser requests `/account` in this project's local dev
+  environment (`hosting_config.tenancy: single`, per the Multi-tenancy note in `CLAUDE.md`): single-tenancy
+  collapses bare account-settings paths onto the seeded default org's routing, so the org-scoped page is what a
+  self-hosted LearnOrbit instance's users actually see, independent of `mode` (this dev environment in fact runs
+  `mode: saas`, so the hub page isn't even 404'd here — it's simply not the route real navigation resolves to).
+
+`AccountGeneral`/`AccountSecurity`/`AccountDangerZone` are shared components mounted by *both* pages, so reuse
+decisions made against one still apply to the other. But a **new** settings section only reaches real users if
+it's wired into the org-scoped surface's three places: `AccountSidebar.tsx` (`NAV_ITEMS`), `AccountClient.tsx`
+(`renderSubpage`/title map), and `account/[subpage]/page.tsx`'s `VALID_SUBPAGES`/title map — `AccountActionsMobile.tsx`
+too, for the mobile bottom bar. Phase 7B-frontend (`docs/PROGRESS.md` item 14) initially wired `AccountFamily`
+into the hub page based on a grep hit alone; live browser verification caught the mismatch (the page never
+rendered) before it shipped. Check which surface a browser actually reaches — don't assume from file discovery —
+before adding to either one.
+
+### Parents (Phase 7C) — cross-org child progress, not an extended per-org endpoint
+
+`get_child_quiz_progress` (`apps/api/src/services/users/child_progress.py`) deliberately does **not** extend
+6H's `get_org_quiz_progress` with a target-user parameter, despite 7A/7B's own forward note suggesting that
+path. Reason: `get_org_quiz_progress` needs an `org_id`, and there is no endpoint anywhere that lets one user
+list *another* user's org memberships (`GET /orgs/{page}/{limit}` is hard-wired to `current_user.id`) — building
+one just so a parent could pick a channel would be real scope creep for a "basic" view. Instead this is a new,
+purpose-built read: `QuizAttempt` joined `Quiz` joined `Organization`, filtered to the child's `user_id` with
+**no** org filter, each row tagged with its org's name/slug for context. Authorization is a `ParentChildLink`
+check (`APPROVED`, caller as `parent_user_id`), not org scoping — a 404 (not 403) on failure, matching
+`respond_to_parent_link`'s existing IDOR convention (`_require_approved_link` in the same file).
+
+Two new endpoints on `/users` (same placement rationale as 7B — user-to-user, global): `GET
+/parent-links/mine` (a router endpoint finally added for `list_my_parent_links`, which 7B built and left
+completely untested/unwired) and `GET /parent-links/children/{child_user_id}/quiz-progress`.
+
+**Frontend gotcha — a failed query can get stuck "paused" forever if it retries.** `useChildQuizProgress`
+originally used the app's default `useQuery` retry (`retry: 1` from `lib/query/client.ts`). Live browser
+verification of the unauthorized-child path (a 404) never resolved to an error state — `fetchStatus` cycled
+`paused ↔ fetching` indefinitely, `status` stuck at `pending`, and the component's `isLoading`/`isError` guards
+both stayed false in between attempts, silently falling through to the "no activity yet" empty state instead of
+"can't show this activity." A raw `fetch()` to the same URL (bypassing react-query) returned the 404 cleanly, so
+the response itself was never the problem. Root-caused to the query's retry path, not to anything in this
+increment's authorization logic. Fix: `retry: false` on `useChildQuizProgress` — a 404 here means "no approved
+link," a fixed authorization fact that retrying can never change, so retrying only delays the correct UI state.
+Any future query whose error path represents a permanent authorization/existence fact (rather than a transient
+failure) should set `retry: false` for the same reason.
+
+**Child identification in the URL**: `child_user_id` (numeric), not username — already known from the "Linked
+family" list's own `ParentChildLink.child_user_id`, so using it avoids an extra username-resolution endpoint
+purely for cosmetic URLs (decided with the user during 7C's planning pass, alongside the cross-org-vs-per-org
+choice above).
+
 ## Areas To Map
 - Frontend application
 - API/backend

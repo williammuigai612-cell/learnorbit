@@ -74,6 +74,59 @@ from src.services.orgs.channel_video_comments import (
     list_channel_video_comments,
     update_channel_video_comment,
 )
+from src.services.orgs.channel_resources import (
+    ChannelResourceCreate,
+    ChannelResourcePublish,
+    ChannelResourceRead,
+    ChannelResourceUpdate,
+    create_channel_resource,
+    delete_channel_resource,
+    get_channel_resource,
+    list_channel_resources,
+    set_channel_resource_published,
+    update_channel_resource,
+)
+from src.services.orgs.questions import (
+    QuestionCreate,
+    QuestionPublish,
+    QuestionRead,
+    QuestionUpdate,
+    create_question,
+    delete_question,
+    get_question,
+    list_questions,
+    set_question_published,
+    update_question,
+)
+from src.services.orgs.quizzes import (
+    QuizCreate,
+    QuizPublish,
+    QuizQuestionAttach,
+    QuizQuestionRead,
+    QuizQuestionReorder,
+    QuizRead,
+    QuizUpdate,
+    attach_question_to_quiz,
+    create_quiz,
+    delete_quiz,
+    detach_question_from_quiz,
+    get_quiz,
+    list_quiz_questions,
+    list_quizzes,
+    reorder_quiz_questions,
+    set_quiz_published,
+    update_quiz,
+)
+from src.services.orgs.quiz_attempts import (
+    QuizAttemptRead,
+    QuizAttemptSubmit,
+    QuizAttemptSummary,
+    get_quiz_attempt,
+    list_quiz_attempts,
+    start_quiz_attempt,
+    submit_quiz_attempt,
+)
+from src.services.orgs.progress import QuizProgressSummary, get_org_quiz_progress
 from src.services.orgs.orgs import (
     create_org,
     create_org_with_config,
@@ -2228,6 +2281,759 @@ async def api_delete_channel_video_comment(
     return await delete_channel_video_comment(
         request, org_id, channelvideo_id, comment_uuid, current_user, db_session
     )
+
+
+# Channel resources (LearnOrbit Phase 5B) — a thin discovery/metadata layer
+# over an existing document Activity. See docs/ARCHITECTURE.md §
+# "Academic Library (Phase 5A)".
+@router.post(
+    "/{org_id}/resources",
+    response_model=ChannelResourceRead,
+    summary="Post an existing document Activity to this channel",
+    description=(
+        "Create a ChannelResource discovery post wrapping an already-created "
+        "PDF document Activity (created via the existing course "
+        "documentpdf-activity endpoint). Owner/admin only. Starts "
+        "unpublished."
+    ),
+    responses={
+        200: {"description": "Channel resource created.", "model": ChannelResourceRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or document activity not found"},
+        409: {"description": "Activity is not a document, or already posted to a channel"},
+    },
+)
+async def api_create_channel_resource(
+    request: Request,
+    org_id: int,
+    data: ChannelResourceCreate,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelResourceRead:
+    return await create_channel_resource(request, org_id, current_user, db_session, data)
+
+
+@router.get(
+    "/{org_id}/resources",
+    response_model=List[ChannelResourceRead],
+    summary="List a channel's resources",
+    description=(
+        "Public/anonymous viewers see published, publicly-visible resources "
+        "only. This channel's owner/admins see everything, including drafts "
+        "and unlisted posts. Supports filtering by educational metadata "
+        "(subject, topic, level, institution_context, resource_type, year). "
+        "Sorts newest-first."
+    ),
+    responses={
+        200: {"description": "Channel resources.", "model": List[ChannelResourceRead]},
+        404: {"description": "Organization not found"},
+    },
+)
+async def api_list_channel_resources(
+    request: Request,
+    org_id: int,
+    subject: Optional[str] = None,
+    topic: Optional[str] = None,
+    level: Optional[str] = None,
+    institution_context: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    year: Optional[str] = None,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> List[ChannelResourceRead]:
+    return await list_channel_resources(
+        request, org_id, current_user, db_session,
+        subject=subject, topic=topic, level=level,
+        institution_context=institution_context, resource_type=resource_type,
+        year=year,
+    )
+
+
+@router.get(
+    "/{org_id}/resources/{channelresource_id}",
+    response_model=ChannelResourceRead,
+    summary="Get a channel resource",
+    description=(
+        "Public/anonymous access for published, publicly-visible resources. "
+        "Unpublished or unlisted resources are only visible to this "
+        "channel's owner/admins."
+    ),
+    responses={
+        200: {"description": "Channel resource.", "model": ChannelResourceRead},
+        403: {"description": "This resource is not published"},
+        404: {"description": "Organization or channel resource not found"},
+    },
+)
+async def api_get_channel_resource(
+    request: Request,
+    org_id: int,
+    channelresource_id: int,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelResourceRead:
+    return await get_channel_resource(request, org_id, channelresource_id, current_user, db_session)
+
+
+@router.put(
+    "/{org_id}/resources/{channelresource_id}",
+    response_model=ChannelResourceRead,
+    summary="Update a channel resource's metadata",
+    description=(
+        "Partial update of a ChannelResource's editable metadata (title, "
+        "description, subject, topic, level, institution_context, "
+        "resource_type, year). Fields omitted from the request body are "
+        "left unchanged. Owner/admin only. Does not touch the underlying "
+        "document Activity's upload/storage."
+    ),
+    responses={
+        200: {"description": "Updated channel resource.", "model": ChannelResourceRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or channel resource not found"},
+        422: {"description": "Title cannot be empty"},
+    },
+)
+async def api_update_channel_resource(
+    request: Request,
+    org_id: int,
+    channelresource_id: int,
+    data: ChannelResourceUpdate,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelResourceRead:
+    return await update_channel_resource(
+        request, org_id, channelresource_id, current_user, db_session, data
+    )
+
+
+@router.put(
+    "/{org_id}/resources/{channelresource_id}/publish",
+    response_model=ChannelResourceRead,
+    summary="Publish or unpublish a channel resource",
+    description="Owner/admin only.",
+    responses={
+        200: {"description": "Updated channel resource.", "model": ChannelResourceRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or channel resource not found"},
+    },
+)
+async def api_set_channel_resource_published(
+    request: Request,
+    org_id: int,
+    channelresource_id: int,
+    data: ChannelResourcePublish,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelResourceRead:
+    return await set_channel_resource_published(
+        request, org_id, channelresource_id, current_user, db_session, data
+    )
+
+
+@router.delete(
+    "/{org_id}/resources/{channelresource_id}",
+    summary="Remove a resource from this channel",
+    description=(
+        "Deletes the ChannelResource discovery post only. The underlying "
+        "document Activity (upload/storage) is left untouched — it may "
+        "still be used inside its course. Owner/admin only."
+    ),
+    responses={
+        200: {"description": "Channel resource removed."},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or channel resource not found"},
+    },
+)
+async def api_delete_channel_resource(
+    request: Request,
+    org_id: int,
+    channelresource_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    await delete_channel_resource(request, org_id, channelresource_id, current_user, db_session)
+    return {"detail": "Channel resource removed"}
+
+
+# Questions (LearnOrbit Phase 6B) — the channel-scoped exam-prep question
+# bank. Owner/admin-only end to end: unlike ChannelVideo/ChannelResource, a
+# bank item is never listed or read by a non-admin directly — see
+# docs/ARCHITECTURE.md § "Exams & Practice (Phase 6A)".
+@router.post(
+    "/{org_id}/questions",
+    response_model=QuestionRead,
+    summary="Create a question bank item",
+    description="Owner/admin only. Starts unpublished.",
+    responses={
+        200: {"description": "Question created.", "model": QuestionRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization not found"},
+        422: {"description": "Empty prompt, or invalid question_type"},
+    },
+)
+async def api_create_question(
+    request: Request,
+    org_id: int,
+    data: QuestionCreate,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuestionRead:
+    return await create_question(request, org_id, current_user, db_session, data)
+
+
+@router.get(
+    "/{org_id}/questions",
+    response_model=List[QuestionRead],
+    summary="List a channel's question bank",
+    description=(
+        "Owner/admin only. Supports filtering by educational metadata "
+        "(subject, topic, level, institution_context) and published state. "
+        "Sorts newest-first."
+    ),
+    responses={
+        200: {"description": "Questions.", "model": List[QuestionRead]},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization not found"},
+    },
+)
+async def api_list_questions(
+    request: Request,
+    org_id: int,
+    subject: Optional[str] = None,
+    topic: Optional[str] = None,
+    level: Optional[str] = None,
+    institution_context: Optional[str] = None,
+    published: Optional[bool] = None,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> List[QuestionRead]:
+    return await list_questions(
+        request, org_id, current_user, db_session,
+        subject=subject, topic=topic, level=level,
+        institution_context=institution_context, published=published,
+    )
+
+
+@router.get(
+    "/{org_id}/questions/{question_id}",
+    response_model=QuestionRead,
+    summary="Get a question bank item",
+    description="Owner/admin only.",
+    responses={
+        200: {"description": "Question.", "model": QuestionRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or question not found"},
+    },
+)
+async def api_get_question(
+    request: Request,
+    org_id: int,
+    question_id: int,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuestionRead:
+    return await get_question(request, org_id, question_id, current_user, db_session)
+
+
+@router.put(
+    "/{org_id}/questions/{question_id}",
+    response_model=QuestionRead,
+    summary="Update a question bank item",
+    description=(
+        "Partial update (prompt, contents, explanation, subject, topic, "
+        "level, institution_context, question_type). Fields omitted from "
+        "the request body are left unchanged. Owner/admin only."
+    ),
+    responses={
+        200: {"description": "Updated question.", "model": QuestionRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or question not found"},
+        422: {"description": "Empty prompt, or invalid question_type"},
+    },
+)
+async def api_update_question(
+    request: Request,
+    org_id: int,
+    question_id: int,
+    data: QuestionUpdate,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuestionRead:
+    return await update_question(request, org_id, question_id, current_user, db_session, data)
+
+
+@router.put(
+    "/{org_id}/questions/{question_id}/publish",
+    response_model=QuestionRead,
+    summary="Publish or unpublish a question bank item",
+    description=(
+        "Owner/admin only. Only published questions are eligible to be "
+        "attached to a Quiz (see docs/ARCHITECTURE.md § \"Exams & Practice "
+        "(Phase 6A)\")."
+    ),
+    responses={
+        200: {"description": "Updated question.", "model": QuestionRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or question not found"},
+    },
+)
+async def api_set_question_published(
+    request: Request,
+    org_id: int,
+    question_id: int,
+    data: QuestionPublish,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuestionRead:
+    return await set_question_published(request, org_id, question_id, current_user, db_session, data)
+
+
+@router.delete(
+    "/{org_id}/questions/{question_id}",
+    summary="Remove a question from this channel's bank",
+    description="Owner/admin only.",
+    responses={
+        200: {"description": "Question removed."},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or question not found"},
+    },
+)
+async def api_delete_question(
+    request: Request,
+    org_id: int,
+    question_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    await delete_question(request, org_id, question_id, current_user, db_session)
+    return {"detail": "Question removed"}
+
+
+# Quizzes (LearnOrbit Phase 6C) — a curated, ordered set of this channel's
+# own published Question bank items. quiz_type ("standard" |
+# "exam_practice") covers both "Quizzes" and "Exam practice" as one entity.
+# See docs/ARCHITECTURE.md § "Exams & Practice (Phase 6A)".
+@router.post(
+    "/{org_id}/quizzes",
+    response_model=QuizRead,
+    summary="Create a quiz",
+    description="Owner/admin only. Starts unpublished, with no questions attached.",
+    responses={
+        200: {"description": "Quiz created.", "model": QuizRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization not found"},
+        422: {"description": "Empty title, invalid quiz_type, or non-positive time_limit_minutes"},
+    },
+)
+async def api_create_quiz(
+    request: Request,
+    org_id: int,
+    data: QuizCreate,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuizRead:
+    return await create_quiz(request, org_id, current_user, db_session, data)
+
+
+@router.get(
+    "/{org_id}/quizzes",
+    response_model=List[QuizRead],
+    summary="List a channel's quizzes",
+    description=(
+        "Public/anonymous viewers see published, publicly-visible quizzes "
+        "only. This channel's owner/admins see everything, including "
+        "drafts and unlisted quizzes. Supports filtering by educational "
+        "metadata (subject, topic, level, institution_context) and "
+        "quiz_type. Sorts newest-first."
+    ),
+    responses={
+        200: {"description": "Quizzes.", "model": List[QuizRead]},
+        404: {"description": "Organization not found"},
+    },
+)
+async def api_list_quizzes(
+    request: Request,
+    org_id: int,
+    subject: Optional[str] = None,
+    topic: Optional[str] = None,
+    level: Optional[str] = None,
+    institution_context: Optional[str] = None,
+    quiz_type: Optional[str] = None,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> List[QuizRead]:
+    return await list_quizzes(
+        request, org_id, current_user, db_session,
+        subject=subject, topic=topic, level=level,
+        institution_context=institution_context, quiz_type=quiz_type,
+    )
+
+
+@router.get(
+    "/{org_id}/quizzes/{quiz_id}",
+    response_model=QuizRead,
+    summary="Get a quiz",
+    description=(
+        "Public/anonymous access for published, publicly-visible quizzes. "
+        "Unpublished or unlisted quizzes are only visible to this "
+        "channel's owner/admins."
+    ),
+    responses={
+        200: {"description": "Quiz.", "model": QuizRead},
+        403: {"description": "This quiz is not published"},
+        404: {"description": "Organization or quiz not found"},
+    },
+)
+async def api_get_quiz(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuizRead:
+    return await get_quiz(request, org_id, quiz_id, current_user, db_session)
+
+
+@router.put(
+    "/{org_id}/quizzes/{quiz_id}",
+    response_model=QuizRead,
+    summary="Update a quiz's metadata",
+    description=(
+        "Partial update (title, description, quiz_type, "
+        "time_limit_minutes, pass_threshold_percentage, visibility, "
+        "subject, topic, level, institution_context). Fields omitted from "
+        "the request body are left unchanged. Owner/admin only. Does not "
+        "touch attached questions — see the /questions endpoints."
+    ),
+    responses={
+        200: {"description": "Updated quiz.", "model": QuizRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or quiz not found"},
+        422: {"description": "Empty title, invalid quiz_type, or non-positive time_limit_minutes"},
+    },
+)
+async def api_update_quiz(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    data: QuizUpdate,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuizRead:
+    return await update_quiz(request, org_id, quiz_id, current_user, db_session, data)
+
+
+@router.put(
+    "/{org_id}/quizzes/{quiz_id}/publish",
+    response_model=QuizRead,
+    summary="Publish or unpublish a quiz",
+    description="Owner/admin only.",
+    responses={
+        200: {"description": "Updated quiz.", "model": QuizRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or quiz not found"},
+    },
+)
+async def api_set_quiz_published(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    data: QuizPublish,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuizRead:
+    return await set_quiz_published(request, org_id, quiz_id, current_user, db_session, data)
+
+
+@router.delete(
+    "/{org_id}/quizzes/{quiz_id}",
+    summary="Delete a quiz",
+    description=(
+        "Owner/admin only. Removes the quiz and its QuizQuestion "
+        "attachments (cascade). The underlying Question bank items are "
+        "left untouched."
+    ),
+    responses={
+        200: {"description": "Quiz removed."},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or quiz not found"},
+    },
+)
+async def api_delete_quiz(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    await delete_quiz(request, org_id, quiz_id, current_user, db_session)
+    return {"detail": "Quiz removed"}
+
+
+@router.get(
+    "/{org_id}/quizzes/{quiz_id}/questions",
+    response_model=List[QuizQuestionRead],
+    summary="List a quiz's attached questions, in order",
+    description=(
+        "Owner/admin only — the response includes each question's full "
+        "contents, including the answer key. Not the student-facing "
+        "quiz-taking view (a separate, later increment)."
+    ),
+    responses={
+        200: {"description": "Attached questions, ordered.", "model": List[QuizQuestionRead]},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or quiz not found"},
+    },
+)
+async def api_list_quiz_questions(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> List[QuizQuestionRead]:
+    return await list_quiz_questions(request, org_id, quiz_id, current_user, db_session)
+
+
+@router.post(
+    "/{org_id}/quizzes/{quiz_id}/questions",
+    response_model=QuizQuestionRead,
+    summary="Attach a bank question to this quiz",
+    description=(
+        "Owner/admin only. The question must belong to this channel's own "
+        "bank and be published. Appended to the end of the quiz's question "
+        "order."
+    ),
+    responses={
+        200: {"description": "Question attached.", "model": QuizQuestionRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization, quiz, or question not found"},
+        409: {"description": "Question is not published, or already attached to this quiz"},
+    },
+)
+async def api_attach_question_to_quiz(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    data: QuizQuestionAttach,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuizQuestionRead:
+    return await attach_question_to_quiz(request, org_id, quiz_id, current_user, db_session, data)
+
+
+@router.put(
+    "/{org_id}/quizzes/{quiz_id}/questions/reorder",
+    response_model=List[QuizQuestionRead],
+    summary="Reorder a quiz's attached questions",
+    description=(
+        "Owner/admin only. Body must contain exactly this quiz's "
+        "currently-attached question_ids, in the desired order — not a "
+        "partial move."
+    ),
+    responses={
+        200: {"description": "Attached questions, in the new order.", "model": List[QuizQuestionRead]},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or quiz not found"},
+        422: {"description": "question_ids has duplicates, or doesn't match the quiz's attached set exactly"},
+    },
+)
+async def api_reorder_quiz_questions(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    data: QuizQuestionReorder,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> List[QuizQuestionRead]:
+    return await reorder_quiz_questions(request, org_id, quiz_id, current_user, db_session, data)
+
+
+@router.delete(
+    "/{org_id}/quizzes/{quiz_id}/questions/{question_id}",
+    summary="Detach a question from this quiz",
+    description=(
+        "Owner/admin only. Removes only the quiz's membership row — the "
+        "underlying Question bank item is left untouched."
+    ),
+    responses={
+        200: {"description": "Question detached."},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization, quiz, or attached question not found"},
+    },
+)
+async def api_detach_question_from_quiz(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    question_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    await detach_question_from_quiz(request, org_id, quiz_id, question_id, current_user, db_session)
+    return {"detail": "Question detached"}
+
+
+# QuizAttempt (LearnOrbit Phase 6D) — attempt-taking + auto-grading for a
+# published Quiz. See docs/ARCHITECTURE.md § "Exams & Practice (Phase 6A)"
+# for the correct-answer/explanation leak-prevention gate this enforces.
+@router.post(
+    "/{org_id}/quizzes/{quiz_id}/attempts",
+    response_model=QuizAttemptRead,
+    summary="Start a quiz attempt",
+    description=(
+        "Any authenticated user; 401 for anonymous. The quiz must be "
+        "published and public, unless the acting user is this channel's "
+        "owner/admin previewing their own draft. Returns the started "
+        "attempt with its questions in student view — is_correct stripped "
+        "from each option, and accepted_answers/explanation omitted."
+    ),
+    responses={
+        200: {"description": "Attempt started.", "model": QuizAttemptRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "This quiz is not published"},
+        404: {"description": "Organization or quiz not found"},
+    },
+)
+async def api_start_quiz_attempt(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuizAttemptRead:
+    return await start_quiz_attempt(request, org_id, quiz_id, current_user, db_session)
+
+
+@router.get(
+    "/{org_id}/quizzes/{quiz_id}/attempts",
+    response_model=list[QuizAttemptSummary],
+    summary="List the current user's attempt history for a quiz",
+    description=(
+        "Any authenticated user; 401 for anonymous. Returns only the "
+        "acting user's own attempts for this quiz (Results, Phase 6G), "
+        "newest attempt_number first. Summary fields only, no per-question "
+        "detail — use GET .../attempts/{attempt_id} for that."
+    ),
+    responses={
+        200: {"description": "The user's attempts for this quiz.", "model": list[QuizAttemptSummary]},
+        401: {"description": "Not authenticated"},
+        404: {"description": "Organization or quiz not found"},
+    },
+)
+async def api_list_quiz_attempts(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> list[QuizAttemptSummary]:
+    return await list_quiz_attempts(request, org_id, quiz_id, current_user, db_session)
+
+
+@router.get(
+    "/{org_id}/quizzes/{quiz_id}/attempts/{attempt_id}",
+    response_model=QuizAttemptRead,
+    summary="Get a quiz attempt",
+    description=(
+        "Owner of the attempt only. While in progress, returns the "
+        "student-view questions (answer key stripped). Once graded, "
+        "returns the full per-answer results (is_correct + explanation)."
+    ),
+    responses={
+        200: {"description": "The attempt.", "model": QuizAttemptRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not your attempt"},
+        404: {"description": "Organization, quiz, or attempt not found"},
+    },
+)
+async def api_get_quiz_attempt(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    attempt_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuizAttemptRead:
+    return await get_quiz_attempt(request, org_id, quiz_id, attempt_id, current_user, db_session)
+
+
+@router.post(
+    "/{org_id}/quizzes/{quiz_id}/attempts/{attempt_id}/submit",
+    response_model=QuizAttemptRead,
+    summary="Submit a quiz attempt's answers and auto-grade",
+    description=(
+        "Owner of the attempt only. All three V1 question types are "
+        "auto-graded on submit — no manual grading path. Every submitted "
+        "question_id must belong to this quiz; questions with no submitted "
+        "answer are graded incorrect. Returns the graded attempt with full "
+        "per-answer results."
+    ),
+    responses={
+        200: {"description": "Attempt graded.", "model": QuizAttemptRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not your attempt"},
+        404: {"description": "Organization, quiz, or attempt not found"},
+        409: {"description": "This attempt has already been submitted"},
+        422: {"description": "Duplicate question_id, or a question not attached to this quiz"},
+    },
+)
+async def api_submit_quiz_attempt(
+    request: Request,
+    org_id: int,
+    quiz_id: int,
+    attempt_id: int,
+    data: QuizAttemptSubmit,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> QuizAttemptRead:
+    return await submit_quiz_attempt(request, org_id, quiz_id, attempt_id, current_user, db_session, data)
+
+
+# Basic Progress Tracking (LearnOrbit Phase 6H) — a read-only aggregation
+# over the existing QuizAttempt/Quiz tables, no new table. See
+# docs/ARCHITECTURE.md § "Exams & Practice (Phase 6A)" point 3.
+@router.get(
+    "/{org_id}/progress",
+    response_model=list[QuizProgressSummary],
+    summary="The current user's own quiz progress in this channel",
+    description=(
+        "Any authenticated user; 401 for anonymous. Returns only the "
+        "acting user's own progress — attempts taken, best/most-recent "
+        "graded score, and last-activity time — for each quiz in this "
+        "org they have actually attempted, most recently active first. "
+        "Quizzes never attempted don't appear."
+    ),
+    responses={
+        200: {"description": "The user's quiz progress in this org.", "model": list[QuizProgressSummary]},
+        401: {"description": "Not authenticated"},
+        404: {"description": "Organization not found"},
+    },
+)
+async def api_get_org_quiz_progress(
+    request: Request,
+    org_id: int,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> list[QuizProgressSummary]:
+    return await get_org_quiz_progress(request, org_id, current_user, db_session)
 
 
 # Include the feature config sub-router (admin-only endpoints)

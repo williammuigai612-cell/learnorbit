@@ -11,6 +11,8 @@ import GeneralWrapperStyled from '@components/Objects/StyledElements/Wrappers/Ge
 import ChannelHeader from '@components/Objects/Channel/ChannelHeader'
 import ChannelVideosSection from '@components/Objects/Channel/ChannelVideosSection'
 import ChannelShortsSection from '@components/Objects/Channel/ChannelShortsSection'
+import ChannelResourcesSection from '@components/Objects/Channel/ChannelResourcesSection'
+import ChannelQuizzesSection from '@components/Objects/Channel/ChannelQuizzesSection'
 import { CHANNEL_VIDEOS_CONTAINER_MARKER } from '@services/organizations/channelVideoUpload'
 
 export default function HomeClient({ orgslug }: { orgslug: string }) {
@@ -79,6 +81,8 @@ export default function HomeClient({ orgslug }: { orgslug: string }) {
           <GeneralWrapperStyled>
             <ChannelShortsSection orgId={org.id} orgslug={orgslug} />
             <ChannelVideosSection orgId={org.id} orgslug={orgslug} />
+            <ChannelResourcesSection orgId={org.id} orgslug={orgslug} />
+            <ChannelQuizzesSection orgId={org.id} orgslug={orgslug} />
           </GeneralWrapperStyled>
         </>
       )}
