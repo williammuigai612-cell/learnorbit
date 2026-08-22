@@ -1056,6 +1056,189 @@ family" list's own `ParentChildLink.child_user_id`, so using it avoids an extra 
 purely for cosmetic URLs (decided with the user during 7C's planning pass, alongside the cross-org-vs-per-org
 choice above).
 
+### Trust & Moderation (Phase 8A) — `ChannelVideoReport` is a new table, not a reuse of `Community.moderation_settings`
+
+Phase 8's roadmap line is "Reporting, content moderation workflow, teacher/organization verification, basic
+admin tools" — four separate sub-increments. 8A is scoped to the first only: an authenticated user can report a
+`ChannelVideo` (long-form or Short) with a fixed reason. There is deliberately no list/review/resolve endpoint
+and no admin queue yet — every row is created with `status="OPEN"` and stays that way; the surface that reads
+and transitions `status` is Phase 8B ("Content moderation workflow"), not built here. Reporting on
+`ChannelResource` (PDFs/past papers) and on comments is also deferred — confirmed with the user during 8A's
+planning pass alongside the two schema decisions below, before implementation.
+
+**Confirmed non-reusable (again): `Community.moderation_settings` / `services/communities/moderation.py`.**
+This was already ruled out for Phase 4C's comment validation (see the Comments entry above); re-checked here
+because "moderation" is the more obviously relevant name for a Phase 8 feature. It remains pre-publish content
+*filtering* (word blocklist, rate limits, min/max length, link blocking) applied at *creation* time, scoped to
+`Community`/`Discussion`. A report is the opposite shape: a post-hoc flag on already-published content, with no
+`Community` in the picture at all for `ChannelVideo`. Nothing about it generalizes to this feature.
+
+**Table shape**: `ChannelVideoReport` — single-purpose FK to `channelvideo_id`, same convention as
+`Notification` and the Phase 4A engagement tables (`ChannelVideoLike`/`Save`/`Share`/`Comment`), not a
+polymorphic `content_type`/`content_id` pair. A `UniqueConstraint("channelvideo_id", "reporter_id")` makes a
+second report from the same user idempotent (returns the existing row) rather than a new one — same
+abuse-prevention shape as `ChannelVideoSave`'s unique constraint, chosen over allowing unlimited reports (which
+would mirror `ChannelVideoShare`'s append-only shape instead) so one user can't inflate a report count by
+resubmitting. Confirmed with the user before building.
+
+**`org_id` is denormalized onto the report row**, copied from the URL's (already-validated-via-`get_channel_video`)
+`org_id` at creation time rather than requiring a join through `channelvideo` to filter by channel later. Minor
+schema choice, called out because a later admin queue (Phase 8B) benefits from filtering reports per channel
+directly, and it's easy to add now, awkward to backfill once report rows exist.
+
+**`reason` is a fixed server-validated set, not free text or a native enum**: `SPAM`, `INAPPROPRIATE`,
+`MISINFORMATION`, `COPYRIGHT`, `OTHER` (`ALLOWED_REPORT_REASONS` in `services/orgs/channel_video_reports.py`,
+mirrored in the frontend's `ChannelVideoReportReason` type — kept in sync manually, same convention as the
+frontend's own `MAX_COMMENT_LENGTH` mirror). Explicitly a Phase 8A placeholder, not sourced from any real
+moderation policy — flagged for the user, not guessed as final.
+
+**Live verification note for future phases**: this session minted a real JWT for an existing seeded user to
+smoke-test the live endpoint against the real dev Postgres (`create_access_token({"sub": "<email>"})`) — the
+`sub` claim is looked up as an **email**, not the username, despite the variable name `username` in
+`get_current_user`'s decode path (`security_get_user(..., email=token_data.username)`). A token minted with
+`sub` set to a bare username decodes fine but then fails user lookup with a generic 401 "Could not validate
+credentials", which reads exactly like a bad signature — worth remembering before assuming a signing-key
+mismatch next time this technique is reused. Also: `apps/api`'s `uv`/`alembic`/`pytest` toolchain is only on
+`PATH` inside a real WSL Ubuntu shell (`wsl -d Ubuntu -e bash -lic '...'`) — the Windows git-bash environment
+the rest of a session's `Bash` tool calls run in does not have it, and Postgres/Redis for local dev already run
+as long-lived Docker containers (`learnhouse-db-dev`, `learnhouse-redis-dev`) independent of any dev-server
+process, so `docker ps` before assuming infrastructure needs starting.
+
+**Browser UI verification was attempted and blocked**, same standing limitation as 3F/3G/3H/4B–4H/5B/7B/7C: the
+whole `(withmenu)/[orgslug]/*` route group 404s in this local dev setup (re-confirmed on a freshly started `bun
+run dev` — both the video watch page and the unrelated `/orgs/default/home` 404 identically, so this is
+pre-existing, not introduced by 8A). Note that the `bb245607` commit's "fix repo-wide blockers" only actually
+resolved the `tsconfig.json` `baseUrl` half of its message — `tsc --noEmit` is now confirmed clean — the
+route-group 404 half is still live.
+
+### Trust & Moderation (Phase 8B) — admin review queue reuses `_require_channel_admin`, not a new RBAC surface
+
+Phase 8B is the "content moderation workflow" line: the admin-facing surface that reads and transitions
+`ChannelVideoReport.status` (created OPEN-only by Phase 8A). Scope: list a channel's reports (optionally filtered
+by status) and resolve/dismiss one. No new table, no migration — `status` already existed on the 8A schema.
+
+**Authorization: reused, not invented.** Both new service functions
+(`list_channel_video_reports`/`resolve_channel_video_report` in `services/orgs/channel_video_reports.py`) gate on
+a locally-defined `_require_channel_admin` — the same duplicated-per-module convention already used by
+`questions.py`/`channel_resources.py`/`quizzes.py`/`channel_videos.py` (each module keeps its own copy rather
+than importing across service modules; `is_org_admin` bakes in the superadmin bypass already). This means a
+channel's own owner/admin reviews reports against **their own channel's** content — the same admin who can
+already publish/unpublish/delete a `ChannelVideo` can also resolve reports against it. A separate
+platform-wide-only moderation role was considered and rejected: no such role exists anywhere else in this
+codebase (superadmin is the only cross-org authority, and it already bypasses `is_org_admin` transparently), so
+inventing one here for a single feature would be new RBAC surface for no proven need — reconsider if real abuse
+of self-moderation (an admin dismissing reports against their own channel's violations) turns out to matter.
+
+**Status transitions are one-way.** `ALLOWED_REPORT_STATUSES = {"RESOLVED", "DISMISSED"}` — deliberately excludes
+`"OPEN"` as a target, so a report can't be reopened via this endpoint once reviewed. `"OPEN"` is only ever set at
+creation time (Phase 8A's `create_channel_video_report`). If reopening turns out to be needed, it's an additive
+change (widen the allowed set), not a breaking one.
+
+**No reviewer/audit-trail columns.** Resolving a report only flips its `status` — no `reviewed_by_id`,
+`reviewed_at`, or resolution-note field was added. This matches the existing convention for every other
+admin-only mutation in this codebase (`ChannelVideo`/`ChannelResource`/`Question` publish/unpublish/delete don't
+record who acted either); LearnHouse's own audit-log system (`services/ee/audit_logs` on the frontend) is
+Enterprise-only and gated via `lib/eeGate.ts` — out of scope for a V1 OSS feature, and not wired into here.
+
+**No cascading action on the reported video.** Resolving a report never auto-unpublishes/deletes the underlying
+`ChannelVideo` — that remains a separate, existing admin action (the publish toggle / delete endpoint from Phase
+2A), left for the admin to take manually if warranted. Keeps the report-review action reversible and low-risk.
+
+**Endpoints**: `GET /orgs/{org_id}/reports` (optional `?status=`) and `PATCH /orgs/{org_id}/reports/{report_uuid}`
+(`{"status": "RESOLVED" | "DISMISSED"}`) on the existing `orgs` router — mirrors `questions.py`'s admin-only
+list-endpoint shape (`api_list_questions`) exactly.
+
+**Frontend**: new `/dash/moderation` page (`page.tsx`/`client.tsx`), mirroring `dash/questions`'s list-with-filter
+layout (Breadcrumbs, `Select` status tabs, skeleton/error/empty states) rather than inventing a new dashboard
+pattern. `services/organizations/channelVideoReports.ts` + `hooks/queries/useChannelVideoReports.ts` are new,
+separate files (not appended to `channelVideos.ts`/`useChannelVideoEngagement.ts`) because this is an
+org-level admin queue, not a per-video action — same file-split precedent as `questions.ts` living apart from
+`channelVideos.ts`. A "Moderation" entry was added to `DashLeftMenu.tsx` (not `DashMobileMenu.tsx`, which also
+omits Questions/Quizzes — consistent with that existing scope, not a gap introduced here).
+
+### Trust & Moderation (Phase 8C) — verification is superadmin-only and deliberately bypasses the EE admin dashboard
+
+Phase 8's roadmap line's third sub-increment: "Teacher/organization verification." Scoped down from an open-ended
+trust workflow to the smallest correct increment during planning (confirmed with the user before implementation):
+a single `Organization.is_verified` boolean, a superadmin-only endpoint to set it, and a public badge. No
+application/request flow, no audit-trail columns — see the Phase 8A/8B entries above for the same minimal-schema
+precedent (a fixed reason set instead of a real taxonomy, no reviewer/timestamp columns on report resolution).
+
+**Gated on `is_user_superadmin`, not `is_org_admin`.** Every other Phase 8 admin action (8B's report review) reuses
+`is_org_admin`, which lets a channel's own owner/admin act on their own channel's content — correct there, because
+reviewing a report about your own video is still just a moderation judgment call. Verification is different: it is
+a claim about the channel itself being legitimate, so a channel granting itself that claim would make the badge
+meaningless. `services/orgs/verification.py`'s `_require_superadmin` calls `is_user_superadmin` directly instead —
+the same raw, non-EE-gated check `is_org_admin` already wraps internally, not the `require_superadmin` FastAPI
+dependency (see next paragraph). The service checks superadmin status *before* looking the org up, so a
+non-superadmin gets 403 for a nonexistent org id too, rather than a 404 that would let an unauthorized caller probe
+which org ids exist.
+
+**The existing platform-wide superadmin dashboard (`/admin/(dashboard)/organizations/[orgId]`) could not be
+reused — it is entirely EE-gated.** `apps/web/app/admin/layout.tsx` calls `isSuperadminSurfaceBlocked` and renders
+`EERequiredScreen` instead of the dashboard whenever the deployment mode is `oss`. Its backing frontend hook
+(`useSuperadminStatus`/`getSuperadminStatus`) calls `ee/superadmin/status` — a route that, on inspection, does not
+exist anywhere in this fork's `apps/api/src` at all (no `superadmin` router prefix), confirming the whole EE admin
+surface is unusable for an OSS-first V1 feature. Likewise, `security/superadmin.py`'s `require_superadmin` FastAPI
+dependency itself calls `ensure_ee_superadmin_surface()`, which 403s outright when the deployment mode is `oss` —
+so 8C's endpoint could not use that dependency either. Both the frontend gate and the backend gate for 8C instead
+use the raw, non-EE checks that already exist and are already used elsewhere in this codebase without an EE
+dependency: `session?.data?.user?.is_superadmin` (the NextAuth session field, already read by `OrgContext.tsx` and
+`AuthenticatedClientElement.tsx`) on the frontend, and `is_user_superadmin` on the backend.
+
+**Toggle lives in the channel's own `OrgEditOther.tsx` settings tab, conditionally rendered.** Not a new route,
+and not the EE admin dashboard (ruled out above). The section only renders when `is_superadmin` is true, so a
+channel's own admin/maintainer viewing the same settings page never sees the control — consistent with the
+backend gate, and avoiding a second, cross-org admin surface that Phase 8D ("Basic admin tools") — the very next
+roadmap line — may end up owning instead.
+
+**`is_verified` is on `OrganizationBase` (so every existing org read returns it) but deliberately excluded from
+`OrganizationUpdate`.** `PUT /orgs/{org_id}` (backed by `OrganizationUpdate` and gated by `is_org_admin` via
+`require_org_admin`) is the general org-settings save path a channel's own admin already has access to. Keeping
+`is_verified` off that schema — rather than, say, gating the field inside `update_org` — means the exclusion is
+structural: there is no code path in the general update flow that could ever touch it, not just a runtime check
+that could be missed on a future edit to `update_org`.
+
+**No audit-trail columns** (`verified_by_id`, `verified_at`) — considered and rejected for this increment, same
+as Phase 8B's report resolution. Flagged explicitly to the user before implementation (a trust claim arguably
+warrants more traceability than a report dismissal) and confirmed as out of scope; revisit if it turns out to
+matter once verification is actually in use.
+
+### Trust & Moderation (Phase 8D) — "Basic admin tools" scoped to wiring existing endpoints into the existing moderation queue, not a new admin system
+
+Phase 8's roadmap line's fourth and final sub-increment, and, like 8C, given zero elaboration anywhere in
+`docs/PRD.md` — just the three words "Basic admin tools." Rather than invent a concrete meaning unilaterally, three
+candidate interpretations were presented to the user before implementation (wire the moderation queue to existing
+publish/delete actions; a new superadmin "suspend this channel" toggle; both) — the user chose the smallest:
+wiring only. This entry exists to record why that's the *whole* increment, not a starting point for more.
+
+**No backend changed at all.** `set_channel_video_published`/`delete_channel_video`
+(`services/orgs/channel_videos.py`) have existed since Phase 2A, gated by `_require_channel_admin` — the exact
+authorization already governing `/dash/moderation` itself (built in 8B). The entire 8D increment is frontend
+wiring: a new `deleteChannelVideo` fetch wrapper (the first one — Phase 2A never got a frontend caller for its
+own delete endpoint), and exposing `setChannelVideoPublished` as an actual UI control for the first time (it
+previously had exactly one caller: the upload-completion auto-publish step). No new authorization code was
+written, so there was nothing new to get wrong there.
+
+**Deliberately not auto-resolving the report.** Unpublishing or deleting the video and resolving/dismissing the
+report are kept as fully independent actions — confirmed with the user before implementation. This preserves
+8B's explicit "no cascading action on the reported video" decision rather than reversing it; 8D adds a shortcut
+to take that action from the same screen, it does not fuse the two concepts together.
+
+**No platform-wide admin/org-listing surface was built, and none should be added later without revisiting this
+decision.** The obvious "next" tool — letting a superadmin find and act on any channel without already knowing
+its slug — was explicitly ruled out for 8D. Building even a minimal OSS-native org list/search would be new
+platform-wide admin infrastructure, which the user's own scope instruction for this phase ruled out
+("do not invent a platform-wide `/admin` system if the OSS architecture does not support it"). The existing
+`/admin/(dashboard)/organizations` dashboard remains EE-gated (see the Phase 8C entry above) and out of reach for
+V1's OSS deployment; if a genuine need for cross-channel discovery emerges later, it needs its own
+brainstorming/approval pass, not a quiet extension of this entry's scope.
+
+**No suspend/ban capability was added.** Considered as one of the three candidate interpretations and not chosen.
+No `is_suspended`/ban concept exists anywhere in this codebase for either `User` or `Organization` — it would have
+been a genuinely new concept (new column, new endpoint, new authorization check), unlike the wiring-only path,
+which added zero new backend surface. Revisit only on an explicit future ask, not as a natural follow-on to 8D.
+
 ## Areas To Map
 - Frontend application
 - API/backend

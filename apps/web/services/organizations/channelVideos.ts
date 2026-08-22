@@ -129,6 +129,22 @@ export async function setChannelVideoPublished(
   return errorHandling(result)
 }
 
+/** Removes the channel's discovery post only (Phase 8D moderation-queue
+ * quick action). The underlying video Activity is left untouched — see
+ * api_delete_channel_video. Owner/admin only, same as every other write
+ * in this file. */
+export async function deleteChannelVideo(
+  org_id: number,
+  channelvideo_id: number,
+  access_token: string
+): Promise<{ detail: string }> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}`,
+    RequestBodyWithAuthHeader('DELETE', null, null, access_token)
+  )
+  return errorHandling(result)
+}
+
 export interface ChannelVideoLikeStatus {
   is_liked: boolean
   like_count: number
@@ -330,6 +346,43 @@ export async function deleteChannelVideoComment(
   const result = await fetch(
     `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/comments/${comment_uuid}`,
     RequestBodyWithAuthHeader('DELETE', null, null, access_token)
+  )
+  return errorHandling(result)
+}
+
+/** Fixed set matching the backend's ALLOWED_REPORT_REASONS
+ * (services/orgs/channel_video_reports.py) — a Phase 8A placeholder pending
+ * a real moderation category list, not sourced from any policy yet. */
+export type ChannelVideoReportReason =
+  | 'SPAM'
+  | 'INAPPROPRIATE'
+  | 'MISINFORMATION'
+  | 'COPYRIGHT'
+  | 'OTHER'
+
+export interface ChannelVideoReport {
+  id: number
+  channelvideo_id: number
+  report_uuid: string
+  reason: ChannelVideoReportReason
+  details: string | null
+  status: string
+  creation_date: string
+}
+
+/** Report the video as the authenticated user (Phase 8A). Idempotent per
+ * (video, reporter) — reporting a video you've already reported returns
+ * your existing report rather than creating a second one. */
+export async function reportChannelVideo(
+  org_id: number,
+  channelvideo_id: number | string,
+  reason: ChannelVideoReportReason,
+  details: string | undefined,
+  access_token: string
+): Promise<ChannelVideoReport> {
+  const result = await fetch(
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/report`,
+    RequestBodyWithAuthHeader('POST', { reason, details }, null, access_token)
   )
   return errorHandling(result)
 }

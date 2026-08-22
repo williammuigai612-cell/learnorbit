@@ -13,6 +13,7 @@ from src.services.orgs.channel_video_likes import ChannelVideoLikeStatus
 from src.services.orgs.channel_video_saves import ChannelVideoSaveStatus
 from src.services.orgs.channel_video_shares import ChannelVideoShareStatus
 from src.services.orgs.channel_video_comments import ChannelVideoCommentRead
+from src.services.orgs.channel_video_reports import ChannelVideoReportRead
 from src.routers.orgs.orgs import router as orgs_router
 from src.security.auth import get_authenticated_user, get_current_user
 from src.security.features_utils.dependencies import require_org_admin
@@ -957,3 +958,158 @@ class TestChannelVideoCommentEndpoints:
 
         assert response.status_code == 200
         assert response.json() == []
+
+
+class TestChannelVideoReportEndpoints:
+    """Router wiring for Phase 8A — mirrors TestChannelVideoCommentEndpoints:
+    a mocked service call verifies route/method/response-shape, while the
+    401 case exercises the real service so the auth guard itself is proven,
+    not just its mocked stand-in."""
+
+    def _report(self, **overrides):
+        data = dict(
+            id=1,
+            channelvideo_id=1,
+            report_uuid="channelvideoreport_1",
+            reason="SPAM",
+            details=None,
+            status="OPEN",
+            creation_date="2026-08-22 00:00:00",
+        )
+        data.update(overrides)
+        return ChannelVideoReportRead(**data)
+
+    async def test_report_video(self, client):
+        with patch(
+            "src.routers.orgs.orgs.create_channel_video_report",
+            new_callable=AsyncMock,
+            return_value=self._report(),
+        ) as create_mock:
+            response = await client.post(
+                "/api/v1/orgs/1/videos/1/report", json={"reason": "SPAM"}
+            )
+
+        assert response.status_code == 200
+        assert response.json() == self._report().model_dump()
+        create_mock.assert_awaited_once()
+
+    async def test_report_video_requires_authentication(self, app, anonymous_user):
+        # Not mocking create_channel_video_report: the real service raises
+        # 401 for an AnonymousUser before touching the database, same
+        # pattern as test_create_comment_requires_authentication above.
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.post(
+                "/api/v1/orgs/1/videos/1/report", json={"reason": "SPAM"}
+            )
+
+        assert response.status_code == 401
+
+    async def test_list_reports(self, client):
+        with patch(
+            "src.routers.orgs.orgs.list_channel_video_reports",
+            new_callable=AsyncMock,
+            return_value=[self._report()],
+        ) as list_mock:
+            response = await client.get("/api/v1/orgs/1/reports")
+
+        assert response.status_code == 200
+        assert response.json() == [self._report().model_dump()]
+        list_mock.assert_awaited_once()
+
+    async def test_list_reports_passes_status_filter(self, client):
+        with patch(
+            "src.routers.orgs.orgs.list_channel_video_reports",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as list_mock:
+            response = await client.get("/api/v1/orgs/1/reports?status=RESOLVED")
+
+        assert response.status_code == 200
+        assert list_mock.await_args.kwargs["status"] == "RESOLVED"
+
+    async def test_list_reports_requires_authentication(self, app, anonymous_user):
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.get("/api/v1/orgs/1/reports")
+
+        assert response.status_code == 401
+
+    async def test_resolve_report(self, client):
+        with patch(
+            "src.routers.orgs.orgs.resolve_channel_video_report",
+            new_callable=AsyncMock,
+            return_value=self._report(status="RESOLVED"),
+        ) as resolve_mock:
+            response = await client.patch(
+                "/api/v1/orgs/1/reports/channelvideoreport_1", json={"status": "RESOLVED"}
+            )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "RESOLVED"
+        resolve_mock.assert_awaited_once()
+
+    async def test_resolve_report_requires_authentication(self, app, anonymous_user):
+        # Not mocking resolve_channel_video_report: the real service raises
+        # 401 for an AnonymousUser before touching the database.
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.patch(
+                "/api/v1/orgs/1/reports/channelvideoreport_1", json={"status": "RESOLVED"}
+            )
+
+        assert response.status_code == 401
+
+
+class TestOrgVerificationEndpoint:
+    """Router wiring for Phase 8C — mirrors TestChannelVideoReportEndpoints:
+    a mocked service call verifies route/method/response-shape, while the
+    401/403 cases exercise the real service so the superadmin-only gate
+    itself is proven, not just its mocked stand-in."""
+
+    async def test_set_verification(self, client):
+        with patch(
+            "src.routers.orgs.orgs.set_org_verification",
+            new_callable=AsyncMock,
+            return_value=_mock_org_read(is_verified=True),
+        ) as set_mock:
+            response = await client.patch(
+                "/api/v1/orgs/1/verification", json={"is_verified": True}
+            )
+
+        assert response.status_code == 200
+        assert response.json()["is_verified"] is True
+        set_mock.assert_awaited_once()
+
+    async def test_set_verification_requires_authentication(self, app, anonymous_user):
+        # Not mocking set_org_verification: the real service raises 401 for
+        # an AnonymousUser before touching the database.
+        app.dependency_overrides[get_current_user] = lambda: anonymous_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anon_client:
+            response = await anon_client.patch(
+                "/api/v1/orgs/1/verification", json={"is_verified": True}
+            )
+
+        assert response.status_code == 401
+
+    async def test_set_verification_rejects_non_superadmin(self, app, admin_user):
+        # Not mocking set_org_verification: the `app` fixture's default
+        # current_user (admin_user) is this channel's own org admin, not a
+        # superadmin — the real service must reject it with 403.
+        app.dependency_overrides[get_current_user] = lambda: admin_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.patch(
+                "/api/v1/orgs/1/verification", json={"is_verified": True}
+            )
+
+        assert response.status_code == 403

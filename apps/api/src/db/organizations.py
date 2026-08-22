@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import List, Optional, TYPE_CHECKING
 from pydantic import BaseModel
-from sqlalchemy import JSON, Column, String
+from sqlalchemy import JSON, Boolean, Column, String
 from sqlmodel import Field, SQLModel
 from src.db.roles import RoleRead
 from src.db.usergroups import UserGroupRead
@@ -39,6 +39,12 @@ class OrganizationBase(SQLModel):
     slug: str
     email: str
     channel_type: OrganizationChannelType = Field(default=OrganizationChannelType.SCHOOL)
+    # Phase 8C — Trust & Moderation: a platform-wide trust signal, not
+    # settable through OrganizationUpdate/api_update_org (which a channel's
+    # own admin can call) — only through the dedicated superadmin-only
+    # verification endpoint. See docs/ARCHITECTURE.md § "Trust & Moderation
+    # (Phase 8C)".
+    is_verified: bool = Field(default=False)
 
 
 class Organization(OrganizationBase, table=True):
@@ -52,6 +58,10 @@ class Organization(OrganizationBase, table=True):
     channel_type: OrganizationChannelType = Field(
         default=OrganizationChannelType.SCHOOL,
         sa_column=Column(String(), nullable=False, server_default="SCHOOL", index=True),
+    )
+    is_verified: bool = Field(
+        default=False,
+        sa_column=Column(Boolean(), nullable=False, server_default="false"),
     )
     creation_date: str = ""
     update_date: str = ""

@@ -77,6 +77,15 @@ export const queryKeys = {
         ? (['channelResource', orgId, 'list', filters] as const)
         : (['channelResource', orgId, 'list'] as const),
   },
+  channelVideoReports: {
+    // Phase 8B admin moderation queue — status is appended to the key so
+    // each filtered tab (Open/Resolved/Dismissed/All) gets its own cache
+    // entry, same convention as channelVideos.list's filters object.
+    list: (orgId: number, status?: string) =>
+      status
+        ? (['channelVideoReport', orgId, 'list', status] as const)
+        : (['channelVideoReport', orgId, 'list'] as const),
+  },
   questions: {
     detail: (orgId: number, questionId: number | string) => ['question', orgId, questionId] as const,
     // Phase 6E-1: mirrors channelResources.list — an active filters object is

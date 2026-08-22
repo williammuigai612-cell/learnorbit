@@ -74,6 +74,18 @@ from src.services.orgs.channel_video_comments import (
     list_channel_video_comments,
     update_channel_video_comment,
 )
+from src.services.orgs.verification import (
+    OrgVerificationUpdate,
+    set_org_verification,
+)
+from src.services.orgs.channel_video_reports import (
+    ChannelVideoReportCreate,
+    ChannelVideoReportRead,
+    ChannelVideoReportStatusUpdate,
+    create_channel_video_report,
+    list_channel_video_reports,
+    resolve_channel_video_report,
+)
 from src.services.orgs.channel_resources import (
     ChannelResourceCreate,
     ChannelResourcePublish,
@@ -2281,6 +2293,127 @@ async def api_delete_channel_video_comment(
     return await delete_channel_video_comment(
         request, org_id, channelvideo_id, comment_uuid, current_user, db_session
     )
+
+
+# Channel video reports (LearnOrbit Phase 8A) — submission only. A report is
+# created with status="OPEN" and read back to the reporter as an ack. See
+# docs/ARCHITECTURE.md § "Trust & Moderation (Phase 8A)".
+@router.post(
+    "/{org_id}/videos/{channelvideo_id}/report",
+    response_model=ChannelVideoReportRead,
+    summary="Report a channel video",
+    description=(
+        "Report the video as the authenticated user for review. Idempotent "
+        "per (video, reporter) — reporting a video you've already reported "
+        "returns your existing report rather than creating a second one. "
+        "Only possible for a video this viewer could actually watch (same "
+        "visibility rule as the watch page)."
+    ),
+    responses={
+        200: {"description": "Report recorded.", "model": ChannelVideoReportRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "This video is not published"},
+        404: {"description": "Organization or channel video not found"},
+        422: {"description": "Invalid reason or details too long"},
+    },
+)
+async def api_create_channel_video_report(
+    request: Request,
+    org_id: int,
+    channelvideo_id: int,
+    data: ChannelVideoReportCreate,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoReportRead:
+    return await create_channel_video_report(
+        request, org_id, channelvideo_id, data, current_user, db_session
+    )
+
+
+# Channel video reports — admin review queue (LearnOrbit Phase 8B). Channel
+# owner/admin only (superadmin bypass baked into is_org_admin), same
+# authorization convention as the question bank's admin-only listing. See
+# docs/ARCHITECTURE.md § "Trust & Moderation (Phase 8B)".
+@router.get(
+    "/{org_id}/reports",
+    response_model=List[ChannelVideoReportRead],
+    summary="List this channel's video reports",
+    description=(
+        "Owner/admin only. Optionally filter by status (OPEN/RESOLVED/"
+        "DISMISSED). Sorts newest-first."
+    ),
+    responses={
+        200: {"description": "Reports.", "model": List[ChannelVideoReportRead]},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization not found"},
+    },
+)
+async def api_list_channel_video_reports(
+    request: Request,
+    org_id: int,
+    status: Optional[str] = None,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> List[ChannelVideoReportRead]:
+    return await list_channel_video_reports(
+        request, org_id, current_user, db_session, status=status
+    )
+
+
+@router.patch(
+    "/{org_id}/reports/{report_uuid}",
+    response_model=ChannelVideoReportRead,
+    summary="Resolve or dismiss a channel video report",
+    description=(
+        "Owner/admin only. Transitions status to RESOLVED or DISMISSED — "
+        "a report can't be reopened once reviewed."
+    ),
+    responses={
+        200: {"description": "Report updated.", "model": ChannelVideoReportRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Not this channel's owner/admin"},
+        404: {"description": "Organization or report not found"},
+        422: {"description": "Invalid status"},
+    },
+)
+async def api_resolve_channel_video_report(
+    request: Request,
+    org_id: int,
+    report_uuid: str,
+    data: ChannelVideoReportStatusUpdate,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ChannelVideoReportRead:
+    return await resolve_channel_video_report(
+        request, org_id, report_uuid, data, current_user, db_session
+    )
+
+
+# Organization verification (LearnOrbit Phase 8C) — a platform-wide trust
+# signal. Superadmin-only: deliberately not reachable via api_update_org, so
+# a channel's own owner/admin can never grant itself verification. See
+# docs/ARCHITECTURE.md § "Trust & Moderation (Phase 8C)".
+@router.patch(
+    "/{org_id}/verification",
+    response_model=OrganizationRead,
+    summary="Set an organization's verified status",
+    description="Superadmin only. Grants or revokes the 'verified' trust badge.",
+    responses={
+        200: {"description": "Organization updated.", "model": OrganizationRead},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Caller is not a platform superadmin"},
+        404: {"description": "Organization not found"},
+    },
+)
+async def api_set_org_verification(
+    request: Request,
+    org_id: int,
+    data: OrgVerificationUpdate,
+    current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> OrganizationRead:
+    return await set_org_verification(request, org_id, data, current_user, db_session)
 
 
 # Channel resources (LearnOrbit Phase 5B) — a thin discovery/metadata layer

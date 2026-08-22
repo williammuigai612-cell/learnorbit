@@ -44,6 +44,7 @@ import {
   Lightning,
   ListChecks,
   Stack,
+  Flag,
 } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 import { DiscordIcon } from '@components/Objects/Icons/DiscordIcon'
@@ -493,6 +494,13 @@ function DashLeftMenu() {
               label={t('quiz.dash.title', { defaultValue: 'Quizzes' })}
               isCollapsed={isCollapsed}
               active={isActivePath('/dash/quizzes')}
+            />
+            <MenuLink
+              href="/dash/moderation"
+              icon={<Flag size={20} weight="fill" />}
+              label={t('moderation.dash.title', { defaultValue: 'Moderation' })}
+              isCollapsed={isCollapsed}
+              active={isActivePath('/dash/moderation')}
             />
             {showLibrary && (
               <MenuLink

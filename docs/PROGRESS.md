@@ -12,13 +12,9 @@
 - [x] Original LearnHouse web application opens locally
 
 ## Current Phase
-**Phase 7 — Parents: IN PROGRESS** (Phases 1–6 are all complete; see below). Phase 7A (`is_parent` self-service
-boolean flag on `User`) and Phase 7B backend (the `parentchildlink` child-approves-parent's-request relationship
-— data model, migration, service, and `/users/parent-links/*` endpoints) are both complete — see
-`docs/ARCHITECTURE.md` § "Parents (Phase 7A)" and this file's item 13. No `docs/ROADMAP.md` Phase 7 box is
-checked yet — both increments are backend-only by design (no UI has consumed either the `is_parent` flag or the
-relationship endpoints yet), the same "backend-only, no frontend" convention several Phase 6 letters used. Next:
-7B-frontend — the settings-page UI (is_parent toggle + request/approve screens).
+**Phase 8 — Trust & Moderation: COMPLETE.** 8A (Reporting), 8B (Content moderation workflow), 8C
+(Teacher/organization verification), and 8D (Basic admin tools) are all complete. Phases 1–8 are done. Next:
+Phase 9 — V1 Hardening. Not started; do not begin automatically.
 
 ## Status Snapshot
 - **Infrastructure fix (2026-08-19): both repo-wide dev-environment blockers
@@ -2984,6 +2980,226 @@ Separate from the product-phase track above; sequenced per `docs/UI_UX_IMPLEMENT
       `docs/ROADMAP.md`'s "Basic learning activity view" box is now checked. **Phase 7 is
       COMPLETE** (all three boxes: parent account capability, parent-child relationship, basic
       learning activity view).
-    **Next per `docs/ROADMAP.md`: Phase 8 — Trust & Moderation** (reporting, content moderation
-    workflow, teacher/organization verification, basic admin tools). Not started; do not begin
+- **Phase 8A (Reporting — ChannelVideo/Shorts, submission only): complete** — an authenticated
+  viewer can report a `ChannelVideo` (long-form or Short) with a fixed reason; the report is
+  stored as `status="OPEN"`. No list/review/resolve endpoint or admin queue yet — that is Phase
+  8B ("Content moderation workflow"), a separate, later increment; scope confirmed with the user
+  before implementation (single approval covering the schema, reason set, and org_id
+  denormalization decisions — see docs/ARCHITECTURE.md § "Trust & Moderation (Phase 8A)").
+  - **Backend**: new `db/channel_video_reports.py` (`ChannelVideoReport` — single-purpose FK to
+    `channelvideo_id`, same convention as `Notification`/the Phase 4A engagement tables; a
+    `UniqueConstraint("channelvideo_id", "reporter_id")` makes a repeat report from the same user
+    idempotent rather than a second row, mirroring `ChannelVideoSave`'s abuse-prevention shape).
+    Migration `a3c7f92e15b4_add_channel_video_report_table.py` (down_revision `23f2681a2070`,
+    the confirmed single head at the time — resolved via real `alembic heads` in WSL after this
+    session's `uv`/Python tooling turned out to only be on PATH in a real WSL Ubuntu shell, not
+    the Windows git-bash environment the rest of the session runs in; applied cleanly against the
+    real dev Postgres). `services/orgs/channel_video_reports.py`
+    (`create_channel_video_report` — reuses the existing `get_channel_video` visibility rule
+    unmodified, same as every other engagement service; `reason` validated against a fixed
+    `ALLOWED_REPORT_REASONS` set server-side — `SPAM`/`INAPPROPRIATE`/`MISINFORMATION`/
+    `COPYRIGHT`/`OTHER`, a placeholder set not sourced from any real moderation policy yet;
+    `details` optional, capped at `MAX_REPORT_DETAILS_LENGTH=1000`). One new endpoint on the
+    existing `orgs` router: `POST /orgs/{org_id}/videos/{channelvideo_id}/report`.
+    `services/communities/moderation.py`'s `Community.moderation_settings` was confirmed (again)
+    not reusable — it is pre-publish content filtering scoped to `Community`/`Discussion`, not a
+    report-after-the-fact mechanism, and doesn't apply to `ChannelVideo` at all.
+  - **Tests (TDD)**: 11 new service tests (`test_channel_video_reports_service.py` — create/
+    idempotent-repeat/isolated-per-different-user, anonymous 401, invalid reason 422, over-length
+    details 422, draft-video 403, missing/cross-org video 404, fixed-reason-set assertion) + 2 new
+    router tests (`TestChannelVideoReportEndpoints` appended to `test_orgs_router.py`, mirroring
+    `TestChannelVideoCommentEndpoints`). Scoped regression (report service + router + channel
+    videos service + engagement model tests): **156 passed, 0 failed.** Full backend suite
+    (`TESTING=true pytest src/tests/`, 0:30:42): **5613 passed, 11 failed, 29 skipped** — the
+    same 11 pre-existing, unrelated baseline failures logged since 4G/7B (core_events ×2,
+    active_users, custom_domains ×3, org_invites ×3, podcasts ×2); 5613 = the 5600-passed
+    baseline plus this phase's 13 new tests exactly, confirming no regressions. Ruff (pinned
+    0.15.9) clean on all changed backend files.
+  - **Frontend**: `services/organizations/channelVideos.ts` gained `reportChannelVideo` +
+    `ChannelVideoReportReason`/`ChannelVideoReport` types; `useReportChannelVideo` mutation hook
+    added to `useChannelVideoEngagement.ts` (no status query — a report has no toggle state to
+    read back, unlike Like/Save/Share, and nothing else in this phase reads report data, so there
+    is no cache to update on success). New `components/Objects/Channel/ReportChannelVideoDialog.tsx`
+    — a `Dialog` with a reason `Select` + optional details `Textarea`, reusing the exact Dialog/
+    Select primitives already shipped for `ChannelVideoCommentsPanel`. Mounted as one small
+    flag-icon entry in `ChannelVideoEngagementBar.tsx` (both `horizontal` and `rail` layouts),
+    gated on `isAuthenticated` like the Save button — no changes to `video.tsx`/`short.tsx`.
+  - **Verification**: `eslint` (strict) and `bunx tsc --noEmit` clean on all changed/new frontend
+    files (the repo-wide `tsconfig.json` `baseUrl` blocker logged since Phase 2G-3 is confirmed
+    resolved — `tsc --noEmit` now runs clean; the fix landed in `bb245607` before this session).
+    **Live backend verification against the real dev environment**: started the FastAPI dev
+    server directly (Postgres/Redis were already up via the existing `learnhouse-db-dev`/
+    `learnhouse-redis-dev` Docker containers) and minted a real JWT for an existing seeded user
+    (`create_access_token({"sub": "<email>"})` — `sub` is looked up as an email, not a username;
+    tripped over this once with a username-only token before finding the correct claim shape) to
+    exercise the live endpoint via `httpx` against the real Postgres: first report → 200 with
+    `status="OPEN"`; repeat report by the same user → 200, same `report_uuid`, confirmed only one
+    row exists via a direct `psql` query; invalid reason → 422; anonymous → 401. The smoke-test
+    row was deleted afterward. **Browser UI verification**: attempted, but blocked by the same
+    standing, pre-existing `(withmenu)/[orgslug]/*` route-group 404 logged since Phase 3F —
+    re-confirmed in this session on a freshly started `bun run dev` (both `/orgs/default/videos/1`
+    and the unrelated `/orgs/default/home` 404 identically), so this is not something Phase 8A
+    introduced. The `bb245607` fix note only covered the `tsconfig.json` `baseUrl` half of that
+    commit, not this route-group issue. Same accepted standing limitation as 3F/3G/3H/4B–4H/5B/
+    7B/7C: verified via backend tests + live API smoke test + lint/typecheck only.
+  - **Deferred (per the approved 8A scope)**: reporting on `ChannelResource` (PDFs/past papers)
+    and on comments; any admin-facing list/queue of reports; `status` transitions (resolve/
+    dismiss) — all explicitly Phase 8B+ per the approved plan, not a gap in this increment.
+  - **Documentation**: this entry; `docs/ARCHITECTURE.md` gained a new decision entry (the
+    unique-constraint/idempotency choice, the fixed placeholder reason set, the denormalized
+    `org_id`, and the `sub`-is-an-email JWT-minting note for future live-smoke-test verification).
+    `docs/ROADMAP.md`'s "Reporting" box is now checked (noting the ChannelResource/comment scope
+    narrowing in the same line).
+    **Next per `docs/ROADMAP.md`: Phase 8B — Content moderation workflow** (the admin-facing
+    review/resolve surface for the `ChannelVideoReport` rows this phase created). Not started; do
+    not begin automatically.
+- **Phase 8B (Content moderation workflow): complete** — the admin-facing surface that lists and
+  resolves the `ChannelVideoReport` rows Phase 8A creates. No new table/migration — `status`
+  already existed; this phase only adds the read/transition surface over it. See
+  docs/ARCHITECTURE.md § "Trust & Moderation (Phase 8B)" for the full decision record
+  (authorization reuse, one-way status transitions, no audit-trail columns, no cascading action on
+  the reported video).
+  - **Backend**: `services/orgs/channel_video_reports.py` gains `list_channel_video_reports`
+    (optional `status` filter, newest-first, scoped to `org_id`) and `resolve_channel_video_report`
+    (`status` → `RESOLVED`/`DISMISSED` only — `OPEN` is not a valid transition target, so a
+    reviewed report can't be reopened via this endpoint). Both gate on a locally-defined
+    `_require_channel_admin` (same duplicated-per-module convention as `questions.py`/
+    `channel_resources.py`/`quizzes.py` — superadmin bypass baked into `is_org_admin`), so a
+    channel's own owner/admin reviews reports against their own channel's content, same as every
+    other admin-only channel action. Two new endpoints on the existing `orgs` router: `GET
+    /orgs/{org_id}/reports` (optional `?status=`) and `PATCH /orgs/{org_id}/reports/{report_uuid}`
+    (`{"status": ...}`), mirroring `questions.py`'s `api_list_questions` shape.
+  - **Tests (TDD)**: 20 new service tests appended to `test_channel_video_reports_service.py`
+    (list: scoping to org, newest-first ordering, status filtering, non-admin/anonymous rejection,
+    cross-org isolation proven via a second `UserOrganization` row rather than relying solely on
+    the 403 guard; resolve: RESOLVED/DISMISSED transitions, invalid-status 422, missing/cross-org
+    report 404, non-admin/anonymous rejection, fixed-status-set assertion) + 6 new router tests
+    (`TestChannelVideoReportEndpoints` extended in `test_orgs_router.py`, mirroring
+    `TestChannelVideoCommentEndpoints`). Scoped regression (router + reports service + channel
+    videos service + engagement/channel-video model tests): **182 passed, 0 failed.** Ruff (pinned
+    0.15.9) clean on all changed backend files.
+  - **Frontend**: new `services/organizations/channelVideoReports.ts`
+    (`listChannelVideoReports`/`resolveChannelVideoReport`, reusing the `ChannelVideoReport` type
+    from `channelVideos.ts`) + `hooks/queries/useChannelVideoReports.ts`
+    (`useChannelVideoReports`/`useResolveChannelVideoReport`, mirroring `useQuestion.ts`'s
+    admin-only-query-gated-on-access-token shape) + a `channelVideoReports.list` query key. New
+    `/dash/moderation` page (`page.tsx`/`client.tsx`) mirroring `dash/questions`'s list-with-filter
+    layout (Breadcrumbs, status-tab `Select`, skeleton/error/empty states) — status tabs
+    Open/Resolved/Dismissed/All (default Open); each report card shows its reason, optional
+    details, relative report date, a "View video" link, and Resolve/Dismiss buttons (hidden once a
+    report is no longer OPEN — no reopen UI, matching the one-way backend transition). New
+    "Moderation" entry added to `DashLeftMenu.tsx` (`Flag` icon, same `MenuLink` pattern as
+    Questions/Quizzes); not added to `DashMobileMenu.tsx`, which already omits Questions/Quizzes
+    too — consistent with that existing scope, not a gap introduced here.
+  - **Verification**: ESLint (`lint:strict`) and `bunx tsc --noEmit` clean on all changed/new
+    frontend files. Full `bun test tests`: **174 passed, 13 failed, 2 errors** — the same
+    pre-existing, unrelated baseline documented since Phase 6/7 (`billing-internal-key.test.mjs`,
+    `catalog-pagination.test.mjs`'s missing fixture, the `ar.json` coverage timeout); no
+    regressions (pass count is higher only because more test files/assertions exist now than at
+    the last-documented 168-pass baseline — no test file was added this phase).
+  - **Known limitation — live browser verification not possible**: same standing app-wide Next.js
+    `[dynamicSegment]/(routeGroup)/page.tsx` 404 regression logged since Phase 3F/4B–4H/5B/7B/7C/8A
+    (`/orgs/[orgslug]/(withmenu)/*` — note `/dash/moderation` itself is **not** under
+    `(withmenu)`, it's under the plain `[orgslug]/dash/*` tree like every other dash page, but the
+    watch page it links out to is). Not independently re-diagnosed this phase; verified via
+    backend tests + lint/typecheck only, same accepted standard as prior phases. No live API smoke
+    test was run this phase (8A already proved the report-creation path live; 8B is a pure
+    read/transition layer over the same rows, exercised thoroughly by the scoped backend suite
+    above).
+  - **Deferred (per the 8B scope, consistent with 8A's boundaries)**: reviewer/timestamp audit
+    trail, reopening a resolved/dismissed report, cascading action on the reported video (manual
+    unpublish/delete remains a separate, existing admin action), reporting/moderation of
+    `ChannelResource` or comments (still Phase 8A's original deferral), bulk actions, pagination
+    (list has no limit/offset — same precedent as `ChannelVideoCommentsPanel`'s `limit=100`
+    single-fetch convention, deferred until report volume warrants it).
+  - **Documentation**: this entry; `docs/ARCHITECTURE.md` gained a new decision entry (the
+    authorization-reuse choice, one-way status transitions, no-audit-trail rationale, no-cascade
+    rationale). `docs/ROADMAP.md`'s "Content moderation workflow" box is now checked.
+    **Next per `docs/ROADMAP.md`: Phase 8 continues with "Teacher/organization verification"**,
+    then "Basic admin tools". Not started; do not begin automatically.
+- **Phase 8C (Teacher/organization verification): complete** — a superadmin-grantable `Organization.is_verified`
+  flag and a public "Verified" badge. Scoped down from the roadmap line during planning (approved by the user
+  before implementation): flag only, no application/request workflow, no audit-trail columns (who/when) — see
+  docs/ARCHITECTURE.md § "Trust & Moderation (Phase 8C)" for the full decision record (why superadmin-only
+  instead of `is_org_admin`, why the platform-wide `/admin` dashboard couldn't be reused, why the field is kept
+  out of `OrganizationUpdate`).
+  - **Backend**: `Organization.is_verified: bool` (new migration `b7e4f1a92c83`, applied to the dev DB this
+    session). New `services/orgs/verification.py`: `_require_superadmin` (reuses `is_user_superadmin` directly —
+    not the EE-gated `require_superadmin` dependency, and not `is_org_admin`, so a channel can never verify
+    itself) and `set_org_verification`, checked *before* the org-existence lookup so a non-superadmin gets 403
+    rather than a 404 that would leak which org ids exist. New endpoint on the existing `orgs` router: `PATCH
+    /orgs/{org_id}/verification` (`{"is_verified": bool}`).
+  - **Tests (TDD)**: 7 new service tests (`test_org_verification_service.py`) — superadmin can verify/unverify;
+    anonymous (401), regular member (403), **the channel's own admin (403 — the key self-verification guard)**,
+    missing org (404), and superadmin-check-before-org-existence (403 not 404) — + 3 new router tests
+    (`TestOrgVerificationEndpoint` in `test_orgs_router.py`, mirroring `TestChannelVideoReportEndpoints`). Scoped
+    regression (orgs router + new service + `test_superadmin.py`): **107 passed, 0 failed.** `uvx ruff@0.15.9`
+    clean on all changed backend files.
+  - **Frontend**: badge only in `ChannelHeader.tsx` (a `BadgeCheck` icon next to the org name when
+    `org.is_verified`) — not added to video/short cards or search listings this phase (deferred, not a gap).
+    Toggle added to `OrgEditOther.tsx` (existing settings tab), gated on `session?.data?.user?.is_superadmin
+    === true` read directly off the NextAuth session — **not** `useSuperadminStatus`/`getSuperadminStatus`,
+    which call `ee/superadmin/status`, a route that does not exist anywhere in this OSS backend (confirmed: no
+    `superadmin` router prefix under `apps/api/src`). New `services/organizations/verification.ts`
+    (`setOrgVerification`) + `hooks/queries/useOrgVerification.ts` (`useSetOrgVerification`, invalidates
+    `queryKeys.org.detail`).
+  - **Verification**: ESLint (`lint:strict`) and `bunx tsc --noEmit` clean on all changed/new frontend files.
+    Full `bun test tests`: **174 passed, 13 failed, 2 errors** — same pre-existing baseline documented since
+    Phase 6/7/8B (no regressions, no new test file needed for this UI). `git diff --check` clean.
+  - **Known limitation — live browser verification not possible**: same standing app-wide Next.js
+    `(withmenu)/[orgslug]/*` route-group 404 logged since Phase 3F/4B–4H/5B/7B/7C/8A/8B; not independently
+    re-diagnosed this phase. Verified via backend tests + migration applied live against the dev Postgres +
+    lint/typecheck only, same accepted standard as prior phases.
+  - **Deferred (per the approved 8C scope)**: application/request workflow (channel owner requesting
+    verification), audit-trail columns (`verified_by_id`/`verified_at`), badge placement beyond the channel
+    header (video/short cards, search/directory listings), and any general admin UI — that is explicitly Phase
+    8D ("Basic admin tools")'s job, not built here.
+  - **Documentation**: this entry; `docs/ARCHITECTURE.md` gained a new decision entry (the superadmin-vs-org-
+    admin rationale, the EE-admin-dashboard conflict and why it ruled out reusing `/admin`, the
+    OrganizationUpdate exclusion, the no-audit-trail rationale). `docs/ROADMAP.md`'s "Teacher/organization
+    verification" box is now checked.
+    **Next per `docs/ROADMAP.md`: Phase 8 continues with "Basic admin tools" (8D).** Not started; do not begin
     automatically.
+- **Phase 8D (Basic admin tools): complete** — closes the exact gap 8B's own docs flagged as deferred ("no
+  cascading action on the reported video... left for the admin to take manually"): the moderation queue
+  (`/dash/moderation`) now has "Unpublish" and "Delete video" quick actions on each OPEN report, calling the
+  existing Phase 2A `PUT .../publish` / `DELETE .../videos/{id}` endpoints directly. Scope was narrowed from the
+  bare roadmap line ("Basic admin tools" — no PRD elaboration, same underspecification 8C had) to this single
+  capability during planning, confirmed with the user before implementation: no suspend/ban, no platform-wide
+  admin/org-listing surface (the existing `/admin` dashboard is EE-gated — see docs/ARCHITECTURE.md § "Trust &
+  Moderation (Phase 8C)" — and building an OSS equivalent was explicitly ruled out as inventing new platform-wide
+  admin infrastructure), no bulk actions, no auto-resolve. See docs/ARCHITECTURE.md § "Trust & Moderation (Phase
+  8D)" for the full decision record.
+  - **Backend**: **zero changes.** Both endpoints (`set_channel_video_published`/`delete_channel_video`) already
+    existed since Phase 2A and are already gated by `_require_channel_admin` — the same authorization already
+    governing the moderation queue itself, so no new RBAC surface. This is the first time either was actually
+    wired into any admin-facing UI: `setChannelVideoPublished` previously had exactly one caller (the
+    upload-completion auto-publish step), and no frontend `deleteChannelVideo` wrapper existed at all before
+    this phase.
+  - **Frontend**: `services/organizations/channelVideos.ts` gains `deleteChannelVideo` (mirrors
+    `updateChannelVideo`'s fetch-wrapper shape exactly). New `hooks/queries/useChannelVideoAdmin.ts`
+    (`useSetChannelVideoPublished`/`useDeleteChannelVideo`) — deliberately not invalidating or touching the
+    reports query, so resolving a report stays a fully separate action from acting on the video (confirmed with
+    the user: no auto-resolve). `/dash/moderation/client.tsx`'s existing OPEN-only action row gains "Unpublish"
+    (plain button, calls the mutation blindly — no per-report video-state fetch, confirmed with the user as
+    acceptable since an already-unpublished video is a harmless no-op) and "Delete video" (wrapped in the
+    existing `ConfirmationModal`, `status="warning"`, mirroring `OrgEditDangerZone.tsx`'s destructive-action
+    pattern exactly).
+  - **Tests**: no new backend tests (no backend code changed) and no new frontend unit tests — matches this
+    codebase's actual convention: no other simple fetch-wrapper service function in `channelVideos.ts` has a
+    dedicated bun test (the `bun test tests` suite covers functions with real logic, not thin fetch wrappers).
+    Both underlying endpoints already have pytest coverage from Phase 2A.
+  - **Verification**: ESLint (`lint:strict`) and `bunx tsc --noEmit` clean on all changed/new frontend files.
+    Full `bun test tests`: **174 passed, 13 failed, 2 errors** — same pre-existing baseline documented since
+    Phase 6/7/8B/8C (no regressions). `git diff --check` clean.
+  - **Known limitation — live browser verification not possible this session**: the API dev server was not
+    running (only the `learnhouse-db-dev`/`learnhouse-redis-dev` Docker containers were up) and was not started
+    to avoid a full environment bootstrap for a change with zero new backend logic over already-proven endpoints
+    — same acceptance rationale as the standing route-group 404 limitation logged since Phase 3F (8A–8C). Not
+    independently verified live; verified via lint/typecheck only.
+  - **Deferred (per the approved 8D scope)**: report auto-resolution when a video is unpublished/deleted, bulk
+    moderation actions, any platform-wide admin/org-listing surface, suspend/ban of any kind, audit trail of who
+    took which action, accurate Publish/Unpublish button state (would require a per-report video-state fetch).
+  - **Documentation**: this entry; `docs/ARCHITECTURE.md` gained a new decision entry. `docs/ROADMAP.md`'s
+    "Basic admin tools" box is now checked — **Phase 8 is complete.**
+    **Next per `docs/ROADMAP.md`: Phase 9 — V1 Hardening.** Not started; do not begin automatically.

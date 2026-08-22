@@ -62,10 +62,10 @@
 - [x] Basic learning activity view
 
 ## Phase 8 — Trust & Moderation
-- [ ] Reporting
-- [ ] Content moderation workflow
-- [ ] Teacher/organization verification
-- [ ] Basic admin tools
+- [x] Reporting (ChannelVideo/Shorts only; ChannelResource and comment reporting deferred — see docs/PROGRESS.md Phase 8A)
+- [x] Content moderation workflow (admin review/resolve queue for ChannelVideo/Shorts reports only — see docs/PROGRESS.md Phase 8B)
+- [x] Teacher/organization verification (superadmin-grantable `is_verified` flag + public badge only — no application/request flow, no audit trail; see docs/PROGRESS.md Phase 8C)
+- [x] Basic admin tools (moderation-queue quick actions — unpublish/delete the reported video directly from `/dash/moderation`, reusing the existing Phase 2A endpoints; no new backend, no suspend/ban, no platform-wide admin surface; see docs/PROGRESS.md Phase 8D)
 
 ## Phase 9 — V1 Hardening
 - [ ] Security review

@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { School, GraduationCap } from 'lucide-react'
+import { School, GraduationCap, BadgeCheck } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useOrgUsers } from '@/hooks/queries/useOrgAdmin'
 import { useFollowOrg, useOrgFollowStatus, useUnfollowOrg } from '@/hooks/queries/useOrg'
@@ -71,6 +71,15 @@ export default function ChannelHeader({ org }: ChannelHeaderProps) {
       <div className="flex flex-col gap-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <h1 className="font-black text-2xl tracking-tight text-gray-900 truncate">{org.name}</h1>
+          {org?.is_verified && (
+            <BadgeCheck
+              size={20}
+              className="text-blue-500 shrink-0"
+              aria-label={t('channel.verified', { defaultValue: 'Verified' })}
+            >
+              <title>{t('channel.verified', { defaultValue: 'Verified' })}</title>
+            </BadgeCheck>
+          )}
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[11px] font-semibold">
             <TypeIcon size={12} />
             {typeLabel}

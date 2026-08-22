@@ -12,11 +12,12 @@ import { Button } from "@components/ui/button"
 import { Label } from "@components/ui/label"
 import { Textarea } from "@components/ui/textarea"
 import { Switch } from '@components/ui/switch'
-import { Code2, Plus, Trash2, PencilLine, AlertTriangle } from "lucide-react"
+import { Code2, Plus, Trash2, PencilLine, AlertTriangle, BadgeCheck } from "lucide-react"
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query/keys'
 import { getAPIUrl, getDeploymentMode } from '@services/config/config'
 import { usePlan } from '@components/Hooks/usePlan'
+import { useSetOrgVerification } from '@/hooks/queries/useOrgVerification'
 import {
   Tooltip,
   TooltipContent,
@@ -49,6 +50,8 @@ const OrgEditOther: React.FC = () => {
   const plan = usePlan()
   const isFree = plan === 'free'
   const isEE = getDeploymentMode() === 'ee'
+  const isSuperadmin = session?.data?.user?.is_superadmin === true
+  const setOrgVerification = useSetOrgVerification(org?.id, org?.slug)
   const [selectedView, setSelectedView] = React.useState<'list' | 'edit'>('list')
   const [scripts, setScripts] = React.useState<Script[]>([])
   const [currentScript, setCurrentScript] = React.useState<Script | null>(null)
@@ -85,6 +88,18 @@ const OrgEditOther: React.FC = () => {
     } finally {
       setIsWatermarkSaving(false)
     }
+  }
+
+  const handleVerificationToggle = (isVerified: boolean) => {
+    const loadingToast = toast.loading(t('dashboard.organization.settings.updating'))
+    setOrgVerification.mutate(isVerified, {
+      onSuccess: () => {
+        toast.success(t('dashboard.organization.settings.update_success'), { id: loadingToast })
+      },
+      onError: () => {
+        toast.error(t('dashboard.organization.settings.update_error'), { id: loadingToast })
+      },
+    })
   }
 
   // Initialize scripts from org
@@ -158,6 +173,32 @@ const OrgEditOther: React.FC = () => {
 
   return (
     <div className="sm:mx-10 mx-0 space-y-4">
+      {/* Verification Toggle — superadmin only (Phase 8C). Not visible to
+          this channel's own owner/admin: a channel must never be able to
+          grant itself the "Verified" badge. */}
+      {isSuperadmin && (
+        <div className="bg-white rounded-xl nice-shadow p-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-base font-medium flex items-center gap-1.5">
+                <BadgeCheck className="h-4 w-4 text-blue-500" />
+                {t('dashboard.organization.settings.verification_label', { defaultValue: 'Verified badge' })}
+              </Label>
+              <p className="text-sm text-gray-500">
+                {t('dashboard.organization.settings.verification_desc', {
+                  defaultValue: 'Superadmin only. Marks this channel as a verified school or teacher.',
+                })}
+              </p>
+            </div>
+            <Switch
+              checked={org?.is_verified === true}
+              onCheckedChange={handleVerificationToggle}
+              disabled={setOrgVerification.isPending}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Watermark Toggle */}
       <div className="bg-white rounded-xl nice-shadow p-4">
         <div className="flex items-center justify-between">

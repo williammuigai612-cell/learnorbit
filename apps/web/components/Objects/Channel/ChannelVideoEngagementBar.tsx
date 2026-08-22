@@ -17,6 +17,7 @@ import {
 } from '@/hooks/queries/useChannelVideoEngagement'
 import { Button } from '@components/ui/button'
 import { ChannelVideoCommentsPanel } from '@components/Objects/Channel/ChannelVideoCommentsPanel'
+import { ReportChannelVideoDialog } from '@components/Objects/Channel/ReportChannelVideoDialog'
 
 interface ChannelVideoEngagementBarProps {
   orgId: number | undefined
@@ -280,6 +281,10 @@ export function ChannelVideoEngagementBar({
             onClick={isAuthenticated ? handleShare : undefined}
           />
         )}
+
+        {isAuthenticated && (
+          <ReportChannelVideoDialog orgId={orgId} channelVideoId={channelVideoId} variant="rail" />
+        )}
       </div>
     )
   }
@@ -368,6 +373,10 @@ export function ChannelVideoEngagementBar({
       )}
 
       <ChannelVideoCommentsPanel orgId={orgId} channelVideoId={channelVideoId} />
+
+      {isAuthenticated && (
+        <ReportChannelVideoDialog orgId={orgId} channelVideoId={channelVideoId} />
+      )}
     </div>
   )
 }

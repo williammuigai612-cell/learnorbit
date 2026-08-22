@@ -20,6 +20,8 @@ import {
   getChannelVideoShareStatus,
   shareChannelVideo,
   type ChannelVideoShareStatus,
+  reportChannelVideo,
+  type ChannelVideoReportReason,
 } from '@services/organizations/channelVideos'
 
 // Phase 4B — likes only. Follows the same status-query + two-mutation shape
@@ -230,5 +232,26 @@ export function useDeleteChannelVideoComment(
         (prev ?? []).filter((c) => c.comment_uuid !== commentUuid)
       )
     },
+  })
+}
+
+// Phase 8A — reporting. No status query: a report has no toggle state to
+// read back, unlike Like/Save/Share. Nothing else in the UI reads report
+// data in this phase (no admin queue yet), so there is no cache to update.
+export function useReportChannelVideo(
+  orgId: number | undefined,
+  channelVideoId: number | string | undefined
+) {
+  const session = useLHSession() as any
+  const accessToken = session?.data?.tokens?.access_token as string | undefined
+
+  return useMutation({
+    mutationFn: ({
+      reason,
+      details,
+    }: {
+      reason: ChannelVideoReportReason
+      details?: string
+    }) => reportChannelVideo(orgId!, channelVideoId!, reason, details, accessToken!),
   })
 }
