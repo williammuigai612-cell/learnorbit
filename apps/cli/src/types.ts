@@ -6,6 +6,10 @@ export interface SetupConfig {
   deploymentId: string
   installDir: string
   channel: 'stable' | 'dev'
+  // Container image repository this deployment tracks, without a tag
+  // (e.g. "ghcr.io/acme/app"). Absent means the official LearnHouse image,
+  // resolved through the release channel above.
+  appImage?: string
 
   // Edition (Community is the default; Enterprise unlocks the licensed stack)
   edition?: Edition
@@ -80,6 +84,10 @@ export interface LearnHouseConfigJson {
   autoSsl: boolean
   useExternalDb: boolean
   orgSlug: string
+  // Image repository this deployment tracks, without a tag. Absent means the
+  // official LearnHouse image — the only behaviour that existed before this
+  // field, and still the behaviour for every config that omits it.
+  appImage?: string
   // Enterprise metadata (absent/`community` for the OSS stack)
   edition?: Edition
   eeTenancy?: EeTenancy

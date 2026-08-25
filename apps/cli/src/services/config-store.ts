@@ -17,6 +17,9 @@ export function writeConfig(config: SetupConfig): void {
     autoSsl: config.autoSsl,
     useExternalDb: config.useExternalDb,
     orgSlug: config.orgSlug || 'default',
+    // Written only when the deployment actually pins its own image, so a
+    // default install produces the same file it always did.
+    ...(config.appImage ? { appImage: config.appImage } : {}),
     edition: config.edition || 'community',
     ...(config.edition === 'enterprise'
       ? { eeTenancy: config.eeTenancy || 'single', eeLocalTls: !!config.eeLocalTls }

@@ -88,7 +88,23 @@
       endpoints and tests for thin frontend fetch wrappers are deliberately excluded as existing
       convention, and one pre-existing inherited-LearnHouse test-isolation defect was recorded but not
       fixed — see docs/PROGRESS.md Phase 9E)
-- [ ] Deployment plan
+- [x] Deployment plan (`docs/DEPLOYMENT_PLAN.md` — production architecture, environment/secrets inventory,
+      migrations, Redis, storage, HTTPS, monitoring, backups, deployment/rollback procedures, CI/CD gaps and
+      the final checklist. Planning pass only: no deployment infrastructure built and no production
+      configuration changed. Resolves 9A's **F3 CSRF** decision **config-first** — scoping
+      `LEARNHOUSE_ALLOWED_REGEXP`/`ALLOWED_ORIGINS` becomes a mandatory pre-deployment step and
+      `CSRFProtectionMiddleware` registration is queued as its own increment, because the shipped
+      catch-all regexp would make registration inert while 403-ing 475 mutation calls across 53 test files.
+      Two deployment decisions were raised there. The `ghcr.io/learnhouse/app` registry pin in the CLI
+      update path is now **resolved**: releases publish to `ghcr.io/williammuigai612-cell/learnorbit` from
+      `lo-X.Y.Z` tags only, `:latest` is not published, the inherited upstream publish triggers are
+      disarmed, and the CLI treats the application image as a per-deployment `appImage` setting rather than
+      a hardcoded upstream path. The content-volume backup gap remains **open**. See docs/PROGRESS.md
+      Phase 9F and the three Deployment entries that follow it)
+- [ ] First GHCR publish and production deployment (still outstanding: `learnorbit-v1` has not been pushed —
+      `origin` is an empty repository — so no workflow has run, no image exists, and the GHCR package
+      visibility has not been set. The publishing pipeline is verified by inspection and tests only, never
+      end-to-end)
 
 ## Rule
 Complete and test one meaningful feature before moving to the next.

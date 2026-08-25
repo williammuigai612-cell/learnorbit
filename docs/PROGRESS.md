@@ -4558,3 +4558,334 @@ alone, and no inherited LearnHouse/EE infrastructure was modified.
 
 - **Next**: **Phase 9F — Deployment plan**, the last Phase 9 item, which owns the F3 CSRF-middleware
   registration decision (§11 / §54.9). Not started; do not begin automatically.
+
+---
+
+## Phase 9F — Deployment Plan (2026-08-25)
+
+The final Phase 9 V1 Hardening increment. **A read-only deployment audit and plan: no deployment
+infrastructure was built, no production configuration was changed, and no code was modified.** It also
+owns and resolves 9A's **F3 CSRF-middleware decision**.
+
+### Completed
+
+- **`docs/DEPLOYMENT_PLAN.md` (new, 17 sections)** — a deployment plan grounded in this repository rather
+  than a generic checklist. Every instruction is traced to a file: current architecture, production
+  prerequisites, environment/secrets inventory, database & migrations, Redis, storage, HTTPS/browser
+  security, monitoring, backups/recovery, deployment strategy, CI/CD, rollback, the deployment procedure,
+  post-deployment verification, the F3 decision, and the final checklist.
+
+- **F3 CSRF — resolved config-first. Decision taken by the user.** This **supersedes** the
+  "register `CSRFProtectionMiddleware` in `apps/api/app.py`" recommendation in `docs/SECURITY_REVIEW.md`
+  § "Recommended fixes before Phase 9F" item 4, which assumed a one-line change. Verified against current
+  code:
+  - Auth is **both** cookie- and header-based. `security/auth.py:85` prefers `Authorization: Bearer <jwt>`
+    (excluding `Bearer lh_*`) and **falls back to the `LH_access` cookie**; the web client sends
+    `credentials: 'include'` on every request, so browser traffic always carries cookies.
+  - `LH_access` (8 h) / `LH_refresh` (30 d): `httponly=True`, `secure=is_request_secure(request)`,
+    `samesite="lax"`, `domain=None` under `tenancy: single` (`routers/auth.py:189-206, 435-452`).
+  - **Why it is unregistered:** `app.py` calls `register_ee_middlewares(app)`, and `is_ee_available()`
+    requires both `ee/` and `ee/hooks.py`. `apps/api/ee` **does not exist in this checkout** (gitignored
+    private overlay) and is deleted from every published image by `ARG LEARNHOUSE_PUBLIC=true`, which
+    `build-community.yaml` and `release.yaml` both pass. The hook is a permanent no-op in OSS builds.
+  - **The finding that changed the decision:** `config.yaml:44` ships an `allowed_regexp` that is a
+    **catch-all — it `fullmatch`es any well-formed origin**, an attacker's included. The file's own
+    comment says CORS and CSRF are "effectively open unless you scope it", and
+    `services/email/utils.py:57` independently detects and ignores this exact pattern as unscoped. The
+    CLI's generated `.env` (`apps/cli/src/templates/env.ts`) sets neither `LEARNHOUSE_ALLOWED_REGEXP` nor
+    `LEARNHOUSE_ALLOWED_ORIGINS`. **Registering the middleware today would therefore protect nothing.**
+  - **And it would break things:** a state-changing request with neither `Origin` nor `Referer` gets 403.
+    That is **475 mutation calls across 53 test files** (`TestClient` sends no `Origin`; only 14 lines in
+    the whole suite set one), plus non-browser JWT clients (only `lh_*` tokens are exempt) and the
+    `app/api/billing/*` / `app/api/loops/*` route handlers that build their own server-side fetches.
+  - **`SameSite=Lax` assessed as near-sufficient for the V1 threat model:** it suppresses cookies on every
+    cross-site state-changing method the API exposes. Residual gaps — cross-site GET (no LearnOrbit
+    mutation is exposed over GET) and same-site different-origin (requires `tenancy: multi` with a dotted
+    cookie domain, which is EE-only and not the V1 deployment). A defence-in-depth gap, not an exploitable
+    hole.
+  - **Outcome:** scoping `LEARNHOUSE_ALLOWED_REGEXP`/`LEARNHOUSE_ALLOWED_ORIGINS` is now a **mandatory
+    pre-deployment step** (it already scopes CORS and email links today); middleware registration is
+    queued as its own increment with the exact diff and six prerequisites recorded in
+    `docs/DEPLOYMENT_PLAN.md` §15.6.
+
+- **Production architecture mapped.** All-in-one image (root `Dockerfile`): Next.js standalone on 8000,
+  FastAPI on 9000, Collab on 4000, internal nginx on 80, all under pm2 via `docker/start.sh`. Outer proxy
+  is Caddy (auto-SSL) or nginx (no TLS), from `apps/cli/src/templates/`. Per-component env, volumes,
+  ports, trust boundaries, health checks and failure behaviour tabulated in §1.3.
+
+- **Recommended strategy: single-server Docker Compose via the LearnHouse CLI, with Caddy.** It is the
+  only path the repo automates end to end — notably the Alembic baseline/stamp handling around
+  `create_all` and the content-volume migration. Separate web/API deployment is **not** supported (no
+  compose wires the three individual Dockerfiles together); Kubernetes and PaaS are out of scope.
+
+### Key findings (audit, not fixes)
+
+1. **`create_all` runs on every API start** (`core/events/database.py:398`) alongside Alembic. It creates
+   missing *tables* but never alters existing ones, so new LearnOrbit tables self-create while new
+   *columns* (`organization.channel_type`, `organization.is_verified`, `user.is_parent`,
+   `channelvideo.content_format`) do not. A create_all-bootstrapped DB also has no `alembic_version` row.
+   The CLI's `ensureAlembicBaseline` handles this; a hand-rolled deploy must stamp explicitly.
+2. **All 14 LearnOrbit migrations are expand-only** — `create_table` or `add_column` with a
+   `server_default`; no `drop_column`, `alter_column`, backfill or bare `NOT NULL`. **Rolling-deploy safe
+   in both orderings**, which is why the plan recommends migrate-then-deploy even though the CLI does
+   deploy-then-migrate. Single head verified: **`b7e4f1a92c83`** (three earlier heads merged by
+   `e6f7a8b9c0d1_merge_heads.py`).
+3. **F2 fail-open documented operationally.** While Redis is unreachable, every LearnOrbit engagement
+   limit is off (30 s process-local backoff, one WARNING line), *and* login/signup/password-reset return
+   500 because the auth-side limiters fail closed. Recorded as an alertable, security-relevant event.
+4. **`npx learnhouse backup` covers PostgreSQL only** — the `learnhouse_content_*` volume (every uploaded
+   video, PDF and past paper) is not included. A DB-only restore yields a catalogue of broken links.
+   Explicit `docker run … tar` command added to the plan (§9.2).
+5. **No `.env.example` exists anywhere in the repo**, which is why §3 writes the full variable inventory
+   out by category (required secret / required non-secret / optional / dev-only / EE-only).
+6. **`.gitignore` gap** — the root file covers `.env`, `.env.local` and `.env.*.local` but **not
+   `.env.production`**, which would therefore be committable. Flagged, not changed.
+7. **CI gaps for a deployment gate:** no `tsc --noEmit` on `apps/web`, no `bun test tests` (so 9E's 48
+   frontend tests never run in CI), no Alembic head check, no migration smoke test, no image smoke test,
+   and **no deployment workflow at all** — release ends at "image pushed".
+8. **`SECURITY_REVIEW.md` §35 is partially stale:** five workflows *do* declare `permissions:` blocks
+   (`api-tests`, `api-lint`, `web-lint`, `lockfiles`, `build-community`) and `release.yaml` declares
+   `contents: write, packages: write`. Recorded for re-audit; **not** silently rewritten.
+
+### Deployment decisions raised, not resolved (out of 9F's read-only scope)
+
+- **Container registry (blocker).** `apps/cli/src/commands/update.ts:21` hardcodes
+  `GHCR_BASE = 'ghcr.io/learnhouse/app'` and `constants.ts:2` sets `APP_IMAGE` to the same, and both
+  `build-community.yaml` and `release.yaml` push there. **`npx learnhouse update` on a LearnOrbit install
+  would pull upstream LearnHouse**, silently reverting Phases 1–9. Options in §12.4.
+- Host sizing, alert thresholds/on-call/log retention, backup retention and RPO/RTO targets — labelled
+  **Deployment decision** rather than invented.
+
+### Files
+
+- **New:** `docs/DEPLOYMENT_PLAN.md`
+- **Changed:** `docs/ROADMAP.md` (Phase 9 "Deployment plan" → `[x]`), `docs/PROGRESS.md` (this entry)
+- **No code, configuration, migration, Dockerfile or workflow file was modified.**
+
+### Verification
+
+- **`git diff --check`** → clean (pre-existing repo-wide CRLF advisories only, in files this increment did
+  not touch).
+- **Every deployment instruction cross-checked against the repository** — `Dockerfile`, `docker/start.sh`,
+  `docker/nginx.conf`, `apps/api/Dockerfile`, `apps/api/docker-entrypoint.sh`, `apps/api/app.py`,
+  `apps/api/config/config.py`, `apps/api/config/config.yaml`, `apps/api/alembic.ini`,
+  `apps/api/migrations/env.py` + all 80 revisions,
+  `apps/api/src/core/events/{database,events,logs,content,autoinstall}.py`,
+  `apps/api/src/core/{redis,ee_hooks}.py`, `apps/api/src/core/middleware/cors.py`,
+  `apps/api/src/security/{auth,csrf,file_validation}.py`, `apps/api/src/services/security/rate_limiting.py`,
+  `apps/api/src/services/health/health.py`, `apps/api/src/routers/{auth,health,local_content}.py`,
+  `apps/api/src/services/utils/upload_content.py`, `apps/web/{next.config.js,server-wrapper.js,proxy.ts}`,
+  `apps/web/services/config/config.ts`, `apps/web/services/utils/ts/requests.ts`,
+  `apps/web/app/api/health/route.ts`, `apps/web/app/api/v1/[...path]/route.ts`, `apps/collab/src/index.ts`,
+  `apps/cli/src/templates/{docker-compose,env,caddyfile,nginx}.ts`,
+  `apps/cli/src/commands/{update,update-ee,backup}.ts`, `apps/cli/src/constants.ts`,
+  `.learnhouse/docker-compose.dev.yml`, all 10 `.github/workflows/`, and the root/app `.gitignore` files.
+- **No secret values were printed or written** — variables are named, never valued. Re-checked the whole
+  document before finalising.
+- **Alembic head derived by parsing the 80 revision files**, not by running `alembic heads` — see
+  Limitations.
+
+### Limitations
+
+- **The `apps/api/.venv` is a Linux venv reached over a Windows UNC path**, so `alembic`, `pytest` and
+  `ruff` could not be executed in this session. Not needed for a documentation-only increment (no code
+  changed, so the previous entries' results stand), but it means the **single-head conclusion should be
+  confirmed with `alembic heads`** before the first deploy.
+- **Nothing was deployed, built, migrated or started.** Every statement is derived from reading the
+  repository. Live verification of the deployment procedure is inherently a deploy-time activity.
+- **No browser verification, and none applicable** — 9F adds no UI and changes no component.
+- **The multi-tenancy verification gap persists** (`SECURITY_REVIEW.md` §6/§3.5) and is carried forward
+  unchanged. Irrelevant to V1's `tenancy: single` deployment, but it means the multi-tenant cookie-domain
+  reasoning in the F3 analysis is analytical, not tested.
+- **Inherited LOW findings deliberately not fixed** and cross-referenced instead of silently repaired:
+  §30 `Permissions-Policy`, §34 API/all-in-one image runs as root, §35 workflow `permissions:` (partially
+  stale), §15 `remotePatterns: '**'`.
+
+### Documentation
+
+`docs/DEPLOYMENT_PLAN.md` (new), `docs/ROADMAP.md` (Phase 9 final item marked complete), and this entry.
+`docs/ARCHITECTURE.md` **not** updated — 9F introduces no new architectural decision, API boundary, data
+model, security pattern or reusable convention; it documents the deployment of what already exists.
+`docs/SECURITY_REVIEW.md` **not** modified — §11 / §54.9 stay DEFERRED, and the F3 decision above records
+*why* the registration recommendation in that file is superseded rather than editing the security review
+from a planning pass.
+
+### Git
+
+No commit, no push. Working tree left as-is.
+
+### Phase 9 status
+
+**Phase 9 V1 Hardening is complete: 9A–9F all closed.** The two remaining `docs/SECURITY_REVIEW.md`
+DEFERRED rows (§11, §54.9) are the single F3 root cause, now decided rather than open. Before a first
+production deploy, two **deployment decisions** are outstanding and are the user's to make: the container
+registry pin (§12.4 — blocker) and the content-volume backup approach (§9.2).
+
+- **Next**: no Phase 9 increment remains. The next smallest recommended increment is the queued
+  **CSRF middleware registration** increment (`docs/DEPLOYMENT_PLAN.md` §15.6 — the `app.py` one-liner
+  plus its six prerequisites, chiefly the `conftest.py` default-`Origin` fixture). Not started; do not
+  begin automatically.
+
+---
+
+## Deployment — LearnOrbit GHCR Image Publishing (2026-08-25)
+
+Resolves the Phase 9F container-registry blocker on the **publishing** side: LearnOrbit release images now
+have a coordinate of their own. Full rationale and the option analysis live in `docs/DEPLOYMENT_PLAN.md`
+§12.4 and are not repeated here.
+
+### Completed
+
+- **Image coordinate re-pointed.** `release.yaml` derives `IMAGE_NAME` from `github.repository` instead of a
+  hardcoded upstream path, so it can only ever resolve to a namespace this repository's own token may write
+  — `ghcr.io/williammuigai612-cell/learnorbit`.
+- **Release tag namespace `lo-X.Y.Z`.** Trigger narrowed to the `lo-[0-9]*` tag glob only — no branch, no
+  pull_request, no workflow_dispatch. The version step strips the prefix, so `lo-1.0.0` publishes `:1.0.0`;
+  the prefix scopes the git tag and never reaches the image tag.
+- **`:latest` no longer published.** One immutable version tag per release. A floating tag moves a
+  deployment without anyone choosing to, and would give the CLI's no-version update fallback a live moving
+  target.
+- **Three inherited upstream triggers disarmed.** `release.yaml` off the `[0-9]*` glob (20 inherited tags
+  matched it); `cli-publish.yaml` off `cli-[0-9]*` (13 inherited tags) and onto `workflow_dispatch`; the
+  numeric tag trigger removed from `notify-infra.yaml`.
+- **`build-community.yaml` given the same derived `IMAGE_NAME`.** It is dormant on this fork (it triggers on
+  prod/dev/main while work happens on `learnorbit-v1`), but a push to `dev` would otherwise have aimed a
+  LearnOrbit build at the upstream path.
+- **Nested `.env` files excluded from the image.** `.dockerignore` now uses `**/.env` and `**/.env.*`. A
+  pattern without `**` matches only at the context root, so the previous bare `.env` left `apps/api/.env` —
+  which holds `LEARNHOUSE_AUTH_JWT_SECRET_KEY` and the database connection string — to be baked into the
+  image at `/app/api/.env` by the stage that copies the API tree wholesale.
+
+Multi-arch builds, buildx push-by-digest with manifest merge, GHA layer caching, `packages: write` and
+`GITHUB_TOKEN` auth are all preserved unchanged.
+
+### Files
+
+`.github/workflows/release.yaml`, `.github/workflows/build-community.yaml`,
+`.github/workflows/cli-publish.yaml`, `.github/workflows/notify-infra.yaml`, `.dockerignore`.
+
+### Verification
+
+- `.dockerignore` behaviour proved empirically with RED/GREEN Docker builds in an isolated scratch context.
+- Trigger globs checked against all 37 inherited tags: none matches `lo-[0-9]*`.
+- `git diff --check` clean. **No workflow was executed and no image was built or published.**
+
+### Limitations
+
+- **Nothing has been published.** `origin` is still an empty repository (zero branches, zero tags), so no
+  workflow has ever run and no GHCR package exists. The anonymous GHCR probe returns `403 DENIED`, which
+  cannot distinguish absent from private.
+- **After the first publish the GHCR package is created private** and its visibility must be set once in the
+  GitHub package settings.
+- **`.github/utils/release.sh` is not usable as-is and was deliberately left untouched** — it creates a bare
+  numeric tag (which cannot match `lo-[0-9]*`), pushes `dev` and `main`, prints the upstream docker pull
+  line, uses BSD-style in-place sed, and calls `gh`. Out of scope for this increment.
+
+### Documentation
+
+`docs/DEPLOYMENT_PLAN.md` §12.4 rewritten from "Blocker to resolve" to "The LearnOrbit image — resolved";
+§13.1, §13.2 and §16 retargeted to the new coordinate.
+
+### Git
+
+No commit, no push, no tag.
+
+---
+
+## Deployment — Deployment-Aware Application Image (appImage) (2026-08-25)
+
+The application image is now a property of the **deployment**, not a hardcoded property of the CLI.
+
+### Completed
+
+- **Optional `appImage` (repository, no tag) in `learnhouse.config.json`**, written only when a deployment
+  pins its own image, so a default install still produces exactly the file it always did.
+- **`npx learnhouse setup --image <ref>`** accepting `ghcr.io/owner/name` or `ghcr.io/owner/name:tag`. The
+  repository half is persisted; the tag half pins the generated `docker-compose.yml`. The value is written
+  verbatim into compose, so it is validated by `validateImageReference` first — unchecked whitespace could
+  inject YAML.
+- **`update` derives the repository from `appImage`** and makes no registry probe for it. The previous
+  resolver only knew the upstream repository and would either 404 a valid version or hand back the upstream
+  image.
+- **Silent image mismatch eliminated.** `update` now fails closed **before the backup** — no pull, no
+  restart, no migration — when the compose file does not reference the configured repository.
+- **`compose-utils.ts` parameterised by repository**: `DEFAULT_APP_IMAGE_REPOSITORY`,
+  `findComposeImageForRepository`, `splitImageReference`, `ComposeImageMismatchError`.
+- **Backward compatible**: a config without `appImage` behaves exactly as before.
+
+### Files
+
+`apps/cli/src/commands/setup.ts`, `apps/cli/src/commands/update.ts`,
+`apps/cli/src/services/compose-utils.ts`, `apps/cli/src/services/config-store.ts`, `apps/cli/src/types.ts`,
+`apps/cli/src/utils/validators.ts`, `apps/cli/bin/learnhouse.ts`, plus the CLI test suites.
+
+### Verification
+
+`bun run test` in `apps/cli`: **634/634 passing**, including 17 new tests covering the flag, the persisted
+config shape, compose pinning, the mismatch failure and the legacy no-`appImage` path.
+
+### Limitations
+
+Not exercised against a live registry — no image has been published yet, so pull/update behaviour is
+verified only against the local compose and config surfaces.
+
+### Git
+
+No commit, no push, no tag.
+
+---
+
+## Deployment — CLI Deployment-Image Security Fixes (2026-08-25)
+
+Security review of the `appImage` increment above found two blockers and four lower-severity issues; all six
+are fixed.
+
+### Completed
+
+- **HIGH-1 — unanchored compose matching (blocker).** The image-line pattern could match inside a comment or
+  an embedded string, so a commented-out `image:` line could be rewritten, and the guard and the rewrite
+  could disagree about which line they were looking at. Both now share one anchored pattern matching
+  horizontal whitespace only, and the rewrite replaces the reference alone, so indentation and trailing
+  comments survive.
+- **HIGH-2 — unvalidated `--to` version (blocker).** The custom-version path skipped the registry lookup
+  that had incidentally rejected junk, so a version carrying a newline was spliced into `docker-compose.yml`
+  as attacker-chosen YAML (an `entrypoint:` override) that would run on the next `up`. `validateImageTag`
+  now runs before the backup, and therefore before any write, pull, restart or migration.
+- **MEDIUM-4 — digest-pinned images refused, not silently retagged.** Dropping a digest discards a
+  supply-chain control.
+- **LOW-5 — interactive Enterprise.** `--image` combined with Enterprise chosen at the prompt now fails
+  loudly instead of discarding the flag.
+- **LOW-6 — version prefix.** `lo-` and `v` are each stripped exactly once and the result validated, so
+  `lo-lo-1.0.0` cannot become a `lo-` image tag.
+
+### Files
+
+`apps/cli/src/commands/update.ts`, `apps/cli/src/services/compose-utils.ts`,
+`apps/cli/src/utils/validators.ts`, and the CLI test suites.
+
+### Verification
+
+- `bun run test` in `apps/cli`: **668/668 passing** (15 files, 86.12s), up from 634, zero regressions.
+- **34 new tests**: comment bypass at both helper and command level, embedded strings, sibling services,
+  digest refusal, `validateImageTag` and version-prefix tables, a ReDoS case, and a `fetch` spy proving the
+  pinned path makes no registry request.
+- All eight original attack probes re-run and **CLOSED**.
+- `tsc --noEmit` output byte-identical to the pre-fix run; `git diff --check` exit 0.
+
+### Limitations — open findings, deliberately out of the fix scope
+
+- **MEDIUM-3**: `config.appImage` is not re-validated on read. Bounded — the guard requires the compose to
+  already contain the value, and the value is regex-escaped.
+- **LOW-7**: `splitImageReference` mis-parses digests (unreachable given the MEDIUM-4 refusal).
+- **LOW-8**: no repository length bound.
+- Quoted image values (`image: "repo:tag"`) now fail closed — deliberate.
+- The upstream `--to` path remains unvalidated, protected only by the registry 404.
+
+### Git
+
+No commit, no push, no tag. Nothing published.
+
+- **Next**: commit this deployment/image milestone, push `learnorbit-v1` to the currently empty `origin`,
+  then create the first `lo-<version>` tag to exercise the GHCR publish and verify the resulting image. The
+  queued **CSRF middleware registration** increment (`docs/DEPLOYMENT_PLAN.md` §15.6) remains the next code
+  increment. Do not begin either automatically.

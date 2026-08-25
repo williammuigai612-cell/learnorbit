@@ -21,7 +21,8 @@ import { dockerComposeUp } from '../services/docker.js'
 import { waitForHealth, waitForOrgSeed } from '../services/health.js'
 import { checkPort, findAvailablePort } from '../utils/network.js'
 import { resolveAppImage } from '../services/version-check.js'
-import { validateEmail, validatePassword, validatePort, validateDomain } from '../utils/validators.js'
+import { validateEmail, validatePassword, validatePort, validateDomain, validateImageReference } from '../utils/validators.js'
+import { splitImageReference } from '../services/compose-utils.js'
 import { setupEnterprise, type EeSetupOptions } from './setup-ee.js'
 
 const STEP_NAMES = [
@@ -125,6 +126,7 @@ export interface SetupOptions {
   orgName?: string
   orgSlug?: string
   channel?: string
+  image?: string
   start?: boolean
   // Enterprise Edition
   edition?: string
@@ -143,6 +145,30 @@ export interface SetupOptions {
 
 function wantsEnterprise(edition?: string): boolean {
   return edition === 'enterprise' || edition === 'ee'
+}
+
+/**
+ * The image this deployment will run.
+ *
+ * A configured `appImage` wins outright and skips the upstream lookup
+ * entirely, so an installation pinned to its own registry can never be handed
+ * the official LearnHouse image. Without one, `resolveAppImage()` runs exactly
+ * as before.
+ *
+ * `requestedTag` comes from the `--image ref[:tag]` the operator typed; only
+ * the repository half is persisted, because the tag is what `update` changes.
+ */
+async function resolveDeploymentImage(
+  config: SetupConfig,
+  requestedTag?: string,
+): Promise<{ image: string; isLatest: boolean }> {
+  if (config.appImage) {
+    return {
+      image: `${config.appImage}:${requestedTag || 'latest'}`,
+      isLatest: !requestedTag,
+    }
+  }
+  return resolveAppImage(config.channel)
 }
 
 function toEeOptions(options: SetupOptions, ci: boolean): EeSetupOptions {
@@ -167,6 +193,25 @@ function toEeOptions(options: SetupOptions, ci: boolean): EeSetupOptions {
 }
 
 export async function setupCommand(options: SetupOptions) {
+  // `--image` applies to both modes, so vet it before either path branches. The
+  // value is written verbatim into docker-compose.yml, so a malformed one is
+  // rejected here rather than becoming malformed YAML later.
+  let requestedImage: { repository: string; tag?: string } | undefined
+  if (options.image !== undefined) {
+    const imageErr = validateImageReference(options.image)
+    if (imageErr) {
+      console.error(`Error: --image "${options.image}" — ${imageErr}`)
+      process.exit(1)
+    }
+    requestedImage = splitImageReference(options.image)
+    // EE resolves its images from the license-gated registry, so honouring
+    // --image there is not possible. Say so instead of ignoring it silently.
+    if (wantsEnterprise(options.edition)) {
+      console.error('Error: --image is not supported with --edition enterprise (EE images are license-gated).')
+      process.exit(1)
+    }
+  }
+
   // ─── CI / non-interactive mode ──────────────────────────────
   if (options.ci) {
     if (wantsEnterprise(options.edition)) {
@@ -241,6 +286,7 @@ export async function setupCommand(options: SetupOptions) {
       deploymentId,
       installDir: resolvedDir,
       channel,
+      appImage: requestedImage?.repository,
       domain: options.domain || 'localhost',
       useHttps: false,
       httpPort,
@@ -268,7 +314,7 @@ export async function setupCommand(options: SetupOptions) {
 
     console.log(`Setting up LearnHouse in ~/.learnhouse/${installName}`)
 
-    const { image: appImage } = await resolveAppImage(config.channel)
+    const { image: appImage } = await resolveDeploymentImage(config, requestedImage?.tag)
     console.log(`Using image: ${appImage}`)
 
     fs.mkdirSync(resolvedDir, { recursive: true })
@@ -337,6 +383,14 @@ export async function setupCommand(options: SetupOptions) {
     edition = choice as string
   }
   if (wantsEnterprise(edition)) {
+    // The early guard in this function only sees `--edition`; the edition can
+    // also be chosen at the prompt above. Re-check here so `--image` is refused
+    // either way rather than being quietly dropped on the EE path.
+    if (requestedImage) {
+      p.log.error('--image is not supported with the Enterprise edition (EE images are license-gated).')
+      process.exit(1)
+      return
+    }
     await setupEnterprise(toEeOptions(options, false))
     return
   }
@@ -426,6 +480,7 @@ export async function setupCommand(options: SetupOptions) {
     deploymentId,
     installDir: resolvedDir,
     channel,
+    appImage: requestedImage?.repository,
     ...domainConfig!,
     ...dbConfig!,
     ...orgConfig!,
@@ -542,7 +597,7 @@ export async function setupCommand(options: SetupOptions) {
   // Resolve Docker image version
   const s0 = p.spinner()
   s0.start('Resolving LearnHouse image version')
-  const { image: appImage, isLatest } = await resolveAppImage(config.channel)
+  const { image: appImage, isLatest } = await resolveDeploymentImage(config, requestedImage?.tag)
   s0.stop(`Using image: ${appImage}`)
   if (isLatest) {
     p.log.warn('No versioned image found — using :latest tag. Pin to a version for stability.')

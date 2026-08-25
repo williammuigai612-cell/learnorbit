@@ -5,12 +5,27 @@ name: Publish CLI to npm
 # `npm publish` if the build breaks, any unit test fails, or the tag, package.json
 # and the version compiled into the built binary disagree.
 
+# TAG TRIGGER DISARMED (LearnOrbit fork).
+#
+# Upstream fires this on `cli-<version>` tags. This fork inherited 13 of them
+# (through `cli-1.5.1`), and pushing any one would attempt to publish THIS
+# fork's CLI source to npm under upstream's package name, `learnhouse`.
+#
+# The safety gates below do not stop that. Gate 2 requires tag == package.json
+# == built binary, and all three already agree at 1.5.1 — so it PASSES rather
+# than blocking. Only an unset or unauthorized NPM_TOKEN stands in the way, and
+# an npm publish is irreversible after 72h and reaches every self-hoster.
+#
+# Manual dispatch only until the LearnOrbit CLI publishing strategy is
+# deliberately designed. That increment owns the package identity (name in
+# apps/cli/package.json) and the tag namespace for this trigger, together —
+# do not re-add a tag trigger before the package name is settled.
+#
+# Original trigger, for that increment: `cli-[0-9]*` — e.g. `cli-1.4.9`, NOT
+# `cli-v1.4.9`. The version (everything after `cli-`) must equal
+# apps/cli/package.json "version".
 on:
-  push:
-    tags:
-      # e.g. `cli-1.4.9` — NOT `cli-v1.4.9`. The version (everything after `cli-`)
-      # must equal apps/cli/package.json "version".
-      - 'cli-[0-9]*'
+  workflow_dispatch:
 
 # Never run two publishes for the same tag concurrently, and never cancel one
 # mid-flight (interrupting the publish step is the one thing we must not do).

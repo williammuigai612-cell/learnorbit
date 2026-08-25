@@ -9,7 +9,7 @@ import { generateNginxConf } from '../src/templates/nginx.js'
 import { generateCaddyfile } from '../src/templates/caddyfile.js'
 import { writeConfig, readConfig, findInstallDir, listInstallations } from '../src/services/config-store.js'
 import { patchComposeAddContentVolume, migrateContentVolume } from '../src/services/content-volume-migration.js'
-import { validateEmail, validatePassword, validateDomain, validatePort, validateSlug, validateRequired } from '../src/utils/validators.js'
+import { validateEmail, validatePassword, validateDomain, validatePort, validateSlug, validateRequired, validateImageReference, validateImageTag } from '../src/utils/validators.js'
 import { quoteEnvValue } from '../src/utils/env-quote.js'
 import { parsePostgresUrl, parseRedisUrl, getPublicIp, checkPort, findAvailablePort, checkTcpConnection } from '../src/utils/network.js'
 import net from 'node:net'
@@ -20,7 +20,14 @@ import { checkForUpdates } from '../src/services/version-check.js'
 import { VERSION } from '../src/constants.js'
 import { autoDetectDeploymentId, listDeploymentContainers, getContainerRestartCount, isDockerInstalled, isDockerRunning, dockerComposeWorks, dockerComposePs, dockerExecToFile, dockerExecFromFile, dockerStats, dockerStatsForContainers, dockerExec, getContainerLogs, getDockerDiskUsage, isTcpPortListening, dockerComposeUpRetry, waitForAptLock, installDockerLinux } from '../src/services/docker.js'
 import { readEnvVar, setEnvVar, isExternalDbInstall, ensureAlembicBaseline, runAlembicUpgrade } from '../src/commands/update-ee.js'
-import { replaceComposeImageTag } from '../src/services/compose-utils.js'
+import {
+  replaceComposeImageTag,
+  ComposeImageMismatchError,
+  DEFAULT_APP_IMAGE_REPOSITORY,
+  findComposeImageForRepository,
+  findComposeDigestImageForRepository,
+  splitImageReference,
+} from '../src/services/compose-utils.js'
 import type { SetupConfig } from '../src/types.js'
 import type { EditionLayout } from '../src/commands/update-ee.js'
 
@@ -2604,5 +2611,264 @@ describe('checkTcpConnection — timeout', () => {
     }
     vi.spyOn(net, 'createConnection').mockReturnValue(fakeSocket as never)
     expect(await checkTcpConnection('127.0.0.1', 5432, 80)).toBe(true)
+  })
+})
+
+// ─── Deployment-aware application image ─────────────────────
+//
+// `appImage` makes the container image a property of the deployment instead of
+// a constant compiled into the CLI. The invariant these tests pin: a config
+// WITHOUT `appImage` behaves exactly as it always has, and a config WITH one is
+// never quietly repointed at the upstream image.
+
+describe('compose-utils — parameterised repository', () => {
+  const LO = 'ghcr.io/williammuigai612-cell/learnorbit'
+
+  it('defaults to the upstream repository when none is given', () => {
+    expect(DEFAULT_APP_IMAGE_REPOSITORY).toBe('ghcr.io/learnhouse/app')
+    const compose = 'image: ghcr.io/learnhouse/app:1.2.2'
+    expect(replaceComposeImageTag(compose, 'ghcr.io/learnhouse/app:1.2.6')).toBe(
+      'image: ghcr.io/learnhouse/app:1.2.6',
+    )
+  })
+
+  it('replaces the tag of a custom repository, leaving the repository intact', () => {
+    const compose = [
+      'services:',
+      '  learnhouse-app:',
+      `    image: ${LO}:1.0.0`,
+      '  db:',
+      '    image: pgvector/pgvector:pg16',
+    ].join('\n')
+    const updated = replaceComposeImageTag(compose, `${LO}:1.0.1`, LO)
+    expect(updated).toContain(`image: ${LO}:1.0.1`)
+    expect(updated).toContain('image: pgvector/pgvector:pg16')
+    expect(updated).not.toContain('ghcr.io/learnhouse/app')
+  })
+
+  it('throws ComposeImageMismatchError when the expected repository is absent', () => {
+    const compose = 'image: ghcr.io/learnhouse/app:1.4.0'
+    expect(() => replaceComposeImageTag(compose, `${LO}:1.0.1`, LO)).toThrow(
+      ComposeImageMismatchError,
+    )
+  })
+
+  it('reports the configured repository and what it actually found', () => {
+    const compose = '  learnhouse-app:\n    image: ghcr.io/learnhouse/app:1.4.0\n  db:\n    image: redis:7\n'
+    try {
+      replaceComposeImageTag(compose, `${LO}:1.0.1`, LO)
+      throw new Error('expected a mismatch')
+    } catch (err) {
+      expect(err).toBeInstanceOf(ComposeImageMismatchError)
+      const e = err as ComposeImageMismatchError
+      expect(e.expectedRepository).toBe(LO)
+      expect(e.foundImages).toEqual(['ghcr.io/learnhouse/app:1.4.0', 'redis:7'])
+    }
+  })
+
+  it('an untagged image for the expected repository is a mismatch, not a silent pass', () => {
+    expect(() => replaceComposeImageTag(`image: ${LO}\n`, `${LO}:1.0.1`, LO)).toThrow(
+      ComposeImageMismatchError,
+    )
+  })
+
+  it('findComposeImageForRepository returns the pinned reference or null', () => {
+    expect(findComposeImageForRepository(`    image: ${LO}:1.0.0`, LO)).toBe(`${LO}:1.0.0`)
+    expect(findComposeImageForRepository('    image: ghcr.io/learnhouse/app:1.0.0', LO)).toBeNull()
+  })
+
+  it('splitImageReference separates a tag but not a registry port', () => {
+    expect(splitImageReference(`${LO}:1.0.0`)).toEqual({ repository: LO, tag: '1.0.0' })
+    expect(splitImageReference(LO)).toEqual({ repository: LO })
+    expect(splitImageReference('localhost:5000/app')).toEqual({ repository: 'localhost:5000/app' })
+    expect(splitImageReference('localhost:5000/app:2.1')).toEqual({
+      repository: 'localhost:5000/app',
+      tag: '2.1',
+    })
+  })
+})
+
+describe('validateImageReference', () => {
+  it('accepts a bare repository and a tagged one', () => {
+    expect(validateImageReference('ghcr.io/williammuigai612-cell/learnorbit')).toBeUndefined()
+    expect(validateImageReference('ghcr.io/williammuigai612-cell/learnorbit:1.0.0')).toBeUndefined()
+    expect(validateImageReference('ghcr.io/learnhouse/app')).toBeUndefined()
+    expect(validateImageReference('localhost:5000/app:dev')).toBeUndefined()
+  })
+
+  it('rejects whitespace, which would otherwise inject YAML into docker-compose.yml', () => {
+    expect(validateImageReference('ghcr.io/a/b\n    command: rm -rf /')).toBeDefined()
+    expect(validateImageReference('ghcr.io/a/ b')).toBeDefined()
+    expect(validateImageReference('')).toBeDefined()
+  })
+
+  it('rejects digests and malformed references', () => {
+    expect(validateImageReference('ghcr.io/a/b@sha256:abc')).toBeDefined()
+    expect(validateImageReference('GHCR.IO/Owner/Name')).toBeDefined()
+    expect(validateImageReference('ghcr.io/a/b:bad tag')).toBeDefined()
+  })
+})
+
+describe('config-store — appImage persistence', () => {
+  const testBase = path.join(os.tmpdir(), 'lh-appimage-test-' + Date.now())
+  const testDir = path.join(testBase, '.learnhouse', 'unit-test')
+  const LO = 'ghcr.io/williammuigai612-cell/learnorbit'
+
+  beforeEach(() => { fs.mkdirSync(testDir, { recursive: true }) })
+  afterEach(() => { fs.rmSync(testBase, { recursive: true, force: true }) })
+
+  it('omits appImage entirely when the deployment does not pin one', () => {
+    writeConfig({ ...baseConfig, installDir: testDir })
+    const data = JSON.parse(
+      fs.readFileSync(path.join(testDir, 'learnhouse.config.json'), 'utf-8'),
+    )
+    expect('appImage' in data).toBe(false)
+    expect(readConfig(testDir)!.appImage).toBeUndefined()
+  })
+
+  it('persists appImage when the deployment pins one', () => {
+    writeConfig({ ...baseConfig, installDir: testDir, appImage: LO })
+    const data = JSON.parse(
+      fs.readFileSync(path.join(testDir, 'learnhouse.config.json'), 'utf-8'),
+    )
+    expect(data.appImage).toBe(LO)
+  })
+
+  it('reads appImage back through readConfig', () => {
+    writeConfig({ ...baseConfig, installDir: testDir, appImage: LO })
+    expect(readConfig(testDir)!.appImage).toBe(LO)
+  })
+
+  it('leaves every unrelated field intact', () => {
+    writeConfig({ ...baseConfig, installDir: testDir, appImage: LO })
+    const data = readConfig(testDir)!
+    expect(data.deploymentId).toBe('test1234')
+    expect(data.domain).toBe('localhost')
+    expect(data.httpPort).toBe(8080)
+    expect(data.orgSlug).toBe('test-org')
+    expect(data.edition).toBe('community')
+    expect(data.useExternalDb).toBe(false)
+  })
+})
+
+// ─── Security regressions: image matching and tag validation ────
+//
+// Each case here corresponds to a finding from the security review of the
+// deployment-aware-image increment. They exist to stop those exact behaviours
+// coming back, so they assert the failure mode, not just the happy path.
+
+describe('compose-utils — only real image: entries count (HIGH-1)', () => {
+  const LO = 'ghcr.io/williammuigai612-cell/learnorbit'
+
+  const commented = [
+    'services:',
+    '  learnhouse-app:',
+    `    # image: ${LO}:1.0.0`,
+    '    image: ghcr.io/learnhouse/app:1.4.0',
+  ].join('\n')
+
+  it('a commented-out image never satisfies the repository guard', () => {
+    expect(findComposeImageForRepository(commented, LO)).toBeNull()
+  })
+
+  it('a commented-out image is never retagged in place of the real one', () => {
+    expect(() => replaceComposeImageTag(commented, `${LO}:1.0.1`, LO)).toThrow(
+      ComposeImageMismatchError,
+    )
+  })
+
+  it('an image: inside another value does not satisfy the guard', () => {
+    const quoted = [
+      '  learnhouse-app:',
+      `    labels:`,
+      `      note: "image: ${LO}:1.0.0"`,
+      '    image: ghcr.io/learnhouse/app:1.4.0',
+    ].join('\n')
+    expect(findComposeImageForRepository(quoted, LO)).toBeNull()
+  })
+
+  it('another service\'s image is not confused with the expected one', () => {
+    const other = [
+      '  learnhouse-app:',
+      `    image: ${LO}:1.0.0`,
+      '  db:',
+      '    image: pgvector/pgvector:pg16',
+    ].join('\n')
+    const updated = replaceComposeImageTag(other, `${LO}:1.0.1`, LO)
+    expect(updated).toContain(`image: ${LO}:1.0.1`)
+    expect(updated).toContain('image: pgvector/pgvector:pg16')
+  })
+
+  it('preserves indentation and a trailing comment', () => {
+    const compose = `      image: ${LO}:1.0.0   # pinned by ops\n`
+    expect(replaceComposeImageTag(compose, `${LO}:1.0.1`, LO)).toBe(
+      `      image: ${LO}:1.0.1   # pinned by ops\n`,
+    )
+  })
+
+  it('still handles the plain upstream form unchanged', () => {
+    expect(
+      replaceComposeImageTag('image: ghcr.io/learnhouse/app:1.2.2', 'ghcr.io/learnhouse/app:1.2.6'),
+    ).toBe('image: ghcr.io/learnhouse/app:1.2.6')
+  })
+})
+
+describe('compose-utils — digest pins are refused, never dropped (MEDIUM-4)', () => {
+  const LO = 'ghcr.io/williammuigai612-cell/learnorbit'
+  const DIGEST = `sha256:${'a'.repeat(64)}`
+
+  it('refuses tag+digest instead of silently discarding the digest', () => {
+    const compose = `    image: ${LO}:1.0.0@${DIGEST}\n`
+    expect(() => replaceComposeImageTag(compose, `${LO}:1.0.1`, LO)).toThrow(
+      ComposeImageMismatchError,
+    )
+    try {
+      replaceComposeImageTag(compose, `${LO}:1.0.1`, LO)
+    } catch (err) {
+      const e = err as ComposeImageMismatchError
+      expect(e.digestImage).toBe(`${LO}:1.0.0@${DIGEST}`)
+      expect(e.message).toMatch(/digest/i)
+    }
+  })
+
+  it('refuses a bare digest pin too', () => {
+    const compose = `    image: ${LO}@${DIGEST}\n`
+    expect(() => replaceComposeImageTag(compose, `${LO}:1.0.1`, LO)).toThrow(
+      ComposeImageMismatchError,
+    )
+    expect(findComposeDigestImageForRepository(compose, LO)).toBe(`${LO}@${DIGEST}`)
+  })
+})
+
+describe('validateImageTag (HIGH-2 / LOW-6)', () => {
+  it('accepts ordinary versions', () => {
+    for (const v of ['1.0.0', '1.0.1', '2.10.3', '1.0.0-rc1', 'latest', 'dev']) {
+      expect(validateImageTag(v)).toBeUndefined()
+    }
+  })
+
+  it('rejects newlines and YAML injection payloads', () => {
+    expect(validateImageTag('1.0.0\n    entrypoint: ["sh","-c","id"]')).toBeDefined()
+    expect(validateImageTag('1.0.0\n')).toBeDefined()
+    expect(validateImageTag('1.0.0 extra')).toBeDefined()
+  })
+
+  it('rejects shell and YAML metacharacters and separators', () => {
+    for (const v of ['1.0.0;id', '1.0.0$(id)', '1.0.0`id`', '1.0.0|id', '1.0.0&id',
+                     'a:b', 'a/b', 'a@b', 'a#b', '{a}', '[a]', '"a"', "'a'", '*', '&a', '!a']) {
+      expect(validateImageTag(v), v).toBeDefined()
+    }
+  })
+
+  it('rejects empty and over-long values', () => {
+    expect(validateImageTag('')).toBeDefined()
+    expect(validateImageTag('   ')).toBeDefined()
+    expect(validateImageTag('t'.repeat(200))).toBeDefined()
+  })
+
+  it('rejects any residual release-tag prefix rather than stripping again', () => {
+    for (const v of ['lo-1.0.0', 'LO-1.0.0', 'Lo-1.0.0']) {
+      expect(validateImageTag(v), v).toMatch(/release-tag prefix/)
+    }
   })
 })

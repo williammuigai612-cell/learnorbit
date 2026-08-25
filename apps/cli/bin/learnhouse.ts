@@ -71,6 +71,7 @@ program
   .option('--org-name <name>', 'Organization display name (default: "Default Organization")')
   .option('--org-slug <slug>', 'Organization slug used in URLs (default: "default")')
   .option('--channel <channel>', 'Release channel: stable or dev (default: "stable")')
+  .option('--image <ref>', 'Container image to deploy, e.g. ghcr.io/owner/name[:tag] (default: the official LearnHouse image)')
   .option('--no-start', 'Skip starting services after setup')
   // ── Enterprise Edition ──
   .option('--edition <edition>', 'Edition to deploy: community (default) or enterprise')

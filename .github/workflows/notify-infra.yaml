@@ -5,8 +5,11 @@ on:
     branches:
       - main
       - dev
-    tags:
-      - '[0-9]*'
+    # Tag trigger removed (LearnOrbit fork). Upstream fires this on any tag
+    # starting with a digit, and this fork inherited 20 such tags — pushing
+    # them would fan out 20 dispatches at the upstream infrastructure repo
+    # (vars.INFRA_REPO / secrets.INFRA_REPO_PAT), which does not exist here, so
+    # every one would fail. Branch and pull_request triggers are unchanged.
   pull_request:
     # A draft only dispatches once it is marked ready (see the job condition).
     types: [opened, synchronize, reopened, ready_for_review, closed]

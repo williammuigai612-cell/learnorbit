@@ -43,7 +43,14 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: learnhouse/app
+  # Same derivation as release.yaml: this workflow builds LearnOrbit code, so it
+  # must never publish under upstream's path. It stays dormant on this fork
+  # today (triggers are prod/dev/main; the working branch is learnorbit-v1), but
+  # a push to `dev` would otherwise have aimed a LearnOrbit build at
+  # ghcr.io/learnhouse/app. Branch builds produce moving `:<branch>` and
+  # immutable `:<branch>-<sha7>` tags — neither is a production reference;
+  # production pins the `:X.Y.Z` tag published by release.yaml.
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:

@@ -6,7 +6,15 @@ import { findInstallDir, readConfig } from '../services/config-store.js'
 import { dockerComposeDown, dockerComposeUp, dockerComposePull } from '../services/docker.js'
 import { migrateContentVolume } from '../services/content-volume-migration.js'
 import { waitForHealth } from '../services/health.js'
-import { replaceComposeImageTag } from '../services/compose-utils.js'
+import { validateImageTag } from '../utils/validators.js'
+import {
+  ComposeImageMismatchError,
+  DEFAULT_APP_IMAGE_REPOSITORY,
+  findComposeDigestImageForRepository,
+  findComposeImageForRepository,
+  listComposeImages,
+  replaceComposeImageTag,
+} from '../services/compose-utils.js'
 import {
   updateEnterprise,
   backupDatabase,
@@ -68,7 +76,65 @@ export async function updateCommand(options: { version?: string; migrate?: boole
     return
   }
 
-  const targetVersion = options.version?.replace(/^v/, '')
+  // The repository this deployment tracks. `appImage` makes it a property of
+  // the installation; without it, the historical upstream default stands.
+  const imageRepository = config.appImage || DEFAULT_APP_IMAGE_REPOSITORY
+  const hasCustomImage = !!config.appImage
+
+  // Normalise the two prefix forms we actually support — `lo-1.0.0` (a git
+  // release tag) and `v1.0.0` — each exactly once. Anything left over is
+  // rejected by validateImageTag below rather than stripped again: repeated
+  // stripping would quietly turn `lo-lo-1.0.0` into a tag that still begins
+  // with `lo-`. Upstream keeps its own normalisation untouched.
+  const versionInput = hasCustomImage
+    ? options.version?.replace(/^lo-/, '')
+    : options.version
+  const targetVersion = versionInput?.replace(/^v/, '')
+
+  const composePath = join(config.installDir, 'docker-compose.yml')
+
+  // Everything below runs before the backup, and therefore before the compose
+  // file is written, before any pull or restart, and before migrations.
+  if (hasCustomImage && targetVersion !== undefined) {
+    // The custom path deliberately makes no registry request, so the registry
+    // lookup that incidentally rejected junk versions upstream is not there to
+    // catch this. Without the check, a version carrying a newline is spliced
+    // straight into docker-compose.yml as extra YAML.
+    const versionErr = validateImageTag(targetVersion)
+    if (versionErr) {
+      p.log.error(`Refusing to update — ${versionErr}`)
+      process.exit(1)
+      return
+    }
+  }
+
+  // FAIL CLOSED, before anything is backed up, pulled or restarted: a
+  // deployment pinned to its own image must already be running that image. If
+  // it is not, the old code silently left the compose file untouched and still
+  // reported success — the one outcome that must never happen, because the next
+  // step would otherwise be to point this install at a different repository.
+  if (hasCustomImage) {
+    const currentCompose = readFileSync(composePath, 'utf-8')
+    const pinned = findComposeImageForRepository(currentCompose, imageRepository)
+    if (!pinned) {
+      const digest = findComposeDigestImageForRepository(currentCompose, imageRepository)
+      p.log.error(
+        digest
+          ? `Digest-pinned image — refusing to update.\n` +
+              `  docker-compose.yml pins: ${digest}\n` +
+              `Retagging would silently drop that digest, which is a supply-chain control. ` +
+              `Nothing was changed: no pull, no restart, no migration. Repin the service to a ` +
+              `plain tag (${imageRepository}:<version>) if you want the CLI to manage it.`
+          : `Image mismatch — refusing to update.\n` +
+              `  configured (learnhouse.config.json appImage): ${imageRepository}\n` +
+              `  docker-compose.yml images:                    ${listComposeImages(currentCompose).join(', ') || '(none)'}\n` +
+              `Nothing was changed: no pull, no restart, no migration. Point docker-compose.yml ` +
+              `at ${imageRepository} or correct appImage, then re-run.`,
+      )
+      process.exit(1)
+      return
+    }
+  }
 
   if (targetVersion) {
     p.intro(pc.cyan(`Updating LearnHouse to v${targetVersion}`))
@@ -104,7 +170,19 @@ export async function updateCommand(options: { version?: string; migrate?: boole
 
     // Resolve the target image tag
     let targetImage: string
-    if (targetVersion) {
+    if (hasCustomImage) {
+      // Deliberately no registry probe: resolveTag() only knows how to ask
+      // about ghcr.io/learnhouse/app, and asking it about a custom repository
+      // would either 404 a valid version or, worse, hand back the upstream
+      // image. The repository never changes here — only the tag does.
+      targetImage = `${imageRepository}:${targetVersion || 'latest'}`
+      if (!targetVersion) {
+        p.log.warn(
+          `No --to version given, so this targets ${imageRepository}:latest. ` +
+            'Deployments that publish only immutable version tags should pass --to <version>.',
+        )
+      }
+    } else if (targetVersion) {
       s.start(`Checking if v${targetVersion} exists`)
       const exists = await resolveTag(targetVersion)
       if (!exists) {
@@ -127,9 +205,23 @@ export async function updateCommand(options: { version?: string; migrate?: boole
     }
 
     // Update the image in docker-compose.yml
-    const composePath = join(config.installDir, 'docker-compose.yml')
     const composeContent = readFileSync(composePath, 'utf-8')
-    writeFileSync(composePath, replaceComposeImageTag(composeContent, targetImage))
+    let nextCompose: string
+    try {
+      nextCompose = replaceComposeImageTag(composeContent, targetImage, imageRepository)
+    } catch (err) {
+      if (!(err instanceof ComposeImageMismatchError)) throw err
+      // The custom path already failed closed above, so reaching here means an
+      // upstream install whose compose does not pin the upstream image. That
+      // used to pass silently; keep the same control flow so existing
+      // installations are unaffected, but stop being silent about it.
+      p.log.warn(
+        `docker-compose.yml pins no ${imageRepository} image, so its tag was left as-is ` +
+          `(found: ${err.foundImages.join(', ') || 'none'}).`,
+      )
+      nextCompose = composeContent
+    }
+    writeFileSync(composePath, nextCompose)
 
     // Preserve any uploaded media before the container is recreated.
     s.start('Checking content storage')

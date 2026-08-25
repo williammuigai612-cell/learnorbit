@@ -12,11 +12,20 @@ dist
 build
 
 # Environment files
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# A pattern without `**` is matched against the path relative to the context
+# root only, so a bare `.env` excludes ./.env and nothing else. That is not
+# enough here: the build context is the repo root (`context: .`, `file:
+# ./Dockerfile`) and stage 5 copies the API tree wholesale with
+# `COPY ./apps/api ./`, so apps/api/.env — which holds
+# LEARNHOUSE_AUTH_JWT_SECRET_KEY and the database connection string — would be
+# baked into the published image at /app/api/.env. apps/api/.dockerignore does
+# not help: Docker reads the ignore file next to the context root, and that one
+# only applies when the context is ./apps/api.
+#
+# CI never hits this (checkout is a clean clone and .env is untracked), but a
+# local `docker build .` at the repo root does. Match at every depth instead.
+**/.env
+**/.env.*
 
 # IDE files
 .vscode
