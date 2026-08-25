@@ -1,6 +1,6 @@
 export const VERSION = '1.5.1'
-export const APP_IMAGE = 'ghcr.io/learnhouse/app:latest'
-export const DEV_IMAGE = 'ghcr.io/learnhouse/app:dev'
+export const APP_IMAGE = 'ghcr.io/williammuigai612-cell/learnorbit:latest'
+export const DEV_IMAGE = 'ghcr.io/williammuigai612-cell/learnorbit:dev'
 export const NGINX_IMAGE = 'nginx:alpine'
 export const POSTGRES_IMAGE = 'pgvector/pgvector:pg16'
 export const POSTGRES_AI_IMAGE = 'pgvector/pgvector:pg16'

@@ -104,11 +104,11 @@ describe('setup --ci --image', () => {
     vi.restoreAllMocks()
   })
 
-  it('without --image, keeps the upstream image and writes no appImage', async () => {
+  it('without --image, keeps the default LearnOrbit image and writes no appImage', async () => {
     await setupCommand({ ...base, name: 'plain' })
     const cfg = JSON.parse(read('plain', 'learnhouse.config.json'))
     expect('appImage' in cfg).toBe(false)
-    expect(read('plain', 'docker-compose.yml')).toContain('ghcr.io/learnhouse/app')
+    expect(read('plain', 'docker-compose.yml')).toContain('ghcr.io/williammuigai612-cell/learnorbit')
   })
 
   it('persists the repository half of --image as appImage', async () => {

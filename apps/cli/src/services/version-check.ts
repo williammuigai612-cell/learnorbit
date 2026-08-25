@@ -2,7 +2,7 @@ import pc from 'picocolors'
 import { VERSION, DEV_IMAGE } from '../constants.js'
 
 const NPM_REGISTRY_URL = 'https://registry.npmjs.org/learnhouse'
-const GHCR_BASE = 'ghcr.io/learnhouse/app'
+const GHCR_BASE = 'ghcr.io/williammuigai612-cell/learnorbit'
 
 function compareVersions(a: string, b: string): number {
   const pa = a.split('.').map(Number)
@@ -43,7 +43,7 @@ export async function checkForUpdates(): Promise<void> {
 /**
  * Resolve the Docker image tag for the LearnHouse app.
  *
- * - channel 'dev'    → always returns ghcr.io/learnhouse/app:dev
+ * - channel 'dev'    → always returns ghcr.io/williammuigai612-cell/learnorbit:dev
  * - channel 'stable' → fetches the latest app release tag from GitHub, falls back to :latest
  */
 export async function resolveAppImage(
@@ -74,14 +74,14 @@ export async function resolveAppImage(
 
     // Verify the Docker image exists for this version
     const tokenResp = await fetch(
-      'https://ghcr.io/token?scope=repository:learnhouse/app:pull',
+      'https://ghcr.io/token?scope=repository:williammuigai612-cell/learnorbit:pull',
       { signal: AbortSignal.timeout(5000) },
     )
     if (!tokenResp.ok) throw new Error('GHCR token failed')
     const { token } = await tokenResp.json() as { token: string }
 
     const manifestResp = await fetch(
-      `https://ghcr.io/v2/learnhouse/app/manifests/${appVersion}`,
+      `https://ghcr.io/v2/williammuigai612-cell/learnorbit/manifests/${appVersion}`,
       {
         signal: AbortSignal.timeout(5000),
         headers: {

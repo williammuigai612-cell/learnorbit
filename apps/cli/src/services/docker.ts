@@ -171,6 +171,25 @@ export function dockerComposePull(cwd: string): void {
   })
 }
 
+/**
+ * Pull one image by reference, outside of any compose file.
+ *
+ * `update` uses this to resolve a tag *before* it rewrites docker-compose.yml:
+ * that rewrite is permanent, so a tag that cannot be pulled has to fail while
+ * the file still pins the image the deployment is actually running. It is the
+ * same fetch {@link dockerComposePull} performs later, just done early enough
+ * that nothing has been changed yet.
+ *
+ * Throws when the image cannot be resolved or pulled. Callers must pass a
+ * reference that has already been validated — see `validateImageReference`.
+ */
+export function dockerPullImage(image: string, cwd?: string): void {
+  execSync(`docker pull ${image}`, {
+    cwd,
+    stdio: 'inherit',
+  })
+}
+
 export function dockerComposeLogs(cwd: string): void {
   const child = spawn('docker', ['compose', 'logs', '--tail', 'all', '-f'], {
     cwd,

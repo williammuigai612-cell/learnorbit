@@ -4889,3 +4889,58 @@ No commit, no push, no tag. Nothing published.
   then create the first `lo-<version>` tag to exercise the GHCR publish and verify the resulting image. The
   queued **CSRF middleware registration** increment (`docs/DEPLOYMENT_PLAN.md` §15.6) remains the next code
   increment. Do not begin either automatically.
+
+---
+
+## Deployment — CLI `update` retag-before-pull fix (2026-08-25)
+
+Confirmed production bug in `update --to <version>` on an installation with a custom `appImage`: the
+compose file was rewritten to the requested tag *before* anything checked the tag could be pulled. A
+nonexistent tag failed at `docker compose pull`, the command exited 1 — and left `docker-compose.yml`
+pinned to an image that does not exist, so the next `up` had nothing to start.
+
+### Completed
+
+- **Resolve before rewrite.** The deployment-pinned path now pulls `<appImage>:<targetVersion|latest>`
+  in a pre-flight step that runs before the backup, the Alembic baseline stamp, the compose rewrite, the
+  restart and the migrations. A tag that cannot be pulled exits 1 with the install untouched. The pull is
+  the same fetch `docker compose pull` performs later, moved to where it is still undoable — no HTTP
+  registry probe was added to the CLI itself, so the custom path still issues no `fetch` of its own (the
+  upstream path's `resolveTag` lookup is unchanged). The `docker pull` does contact the registry, as
+  `docker compose pull` already did — what changed is when, not whether.
+- The composed reference is vetted with the existing `validateImageReference` before it reaches a shell.
+- `--to`, `--migrate`/`--no-migrate`, `--no-backup`, digest refusal, the mismatch fail-closed guard
+  and the upstream warn arm are all unchanged.
+
+### Files
+
+`apps/cli/src/commands/update.ts` (pre-flight resolve; target image reused instead of recomputed),
+`apps/cli/src/services/docker.ts` (new `dockerPullImage`), `apps/cli/tests/update-migration.test.ts`
+(4 new tests).
+
+### Verification
+
+- `apps/cli` normal suite (`tsup` build + the 15 files `bun run test` runs): **672/672 passing**, 15
+  files — 668 pre-existing plus the 4 new, zero regressions.
+- **RED proven**: with the pre-flight pull commented out, "leaves docker-compose.yml byte-identical after
+  that failure" fails with the compose left on `0.0.0-nonexistent`; restored, it passes.
+- New tests: nonexistent custom-image version exits 1; compose byte-identical after that failure; no
+  compose pull/up/down and no alembic after it; a valid custom-image update still rewrites the tag and
+  restarts.
+- `git diff --check` exit 0.
+
+### Limitations
+
+- Not exercised against a live Docker daemon or registry; the failure is simulated at the `execSync`
+  boundary (both `docker pull repo:tag` and the `docker compose pull` that resolves the compose file).
+- `tsc --noEmit` in `apps/cli` is pre-existing noise in this environment (`@types/node` unresolved —
+  TS2591 across untouched files); the changed files add no new diagnostics.
+- The upstream (non-`appImage`) path is untouched: it still relies on its GHCR manifest lookup.
+
+### Git
+
+No commit, no push, no tag. Nothing published.
+
+- **Next**: unchanged — commit the deployment/image milestone and push `learnorbit-v1`, with the queued
+  **CSRF middleware registration** increment (`docs/DEPLOYMENT_PLAN.md` §15.6) as the next code increment.
+  Do not begin either automatically.

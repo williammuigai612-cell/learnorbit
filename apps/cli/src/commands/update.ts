@@ -3,10 +3,10 @@ import { join } from 'node:path'
 import * as p from '@clack/prompts'
 import pc from 'picocolors'
 import { findInstallDir, readConfig } from '../services/config-store.js'
-import { dockerComposeDown, dockerComposeUp, dockerComposePull } from '../services/docker.js'
+import { dockerComposeDown, dockerComposeUp, dockerComposePull, dockerPullImage } from '../services/docker.js'
 import { migrateContentVolume } from '../services/content-volume-migration.js'
 import { waitForHealth } from '../services/health.js'
-import { validateImageTag } from '../utils/validators.js'
+import { validateImageReference, validateImageTag } from '../utils/validators.js'
 import {
   ComposeImageMismatchError,
   DEFAULT_APP_IMAGE_REPOSITORY,
@@ -26,19 +26,19 @@ import {
 // Community (monolith) layout: one app container, alembic under /app/api, in-container db.
 const COMMUNITY_LAYOUT: EditionLayout = { appService: 'learnhouse-app', alembicCwd: '/app/api', dbService: 'db' }
 
-const GHCR_BASE = 'ghcr.io/learnhouse/app'
+const GHCR_BASE = 'ghcr.io/williammuigai612-cell/learnorbit'
 
 async function resolveTag(version: string): Promise<boolean> {
   try {
     const tokenResp = await fetch(
-      'https://ghcr.io/token?scope=repository:learnhouse/app:pull',
+      'https://ghcr.io/token?scope=repository:williammuigai612-cell/learnorbit:pull',
       { signal: AbortSignal.timeout(5000) },
     )
     if (!tokenResp.ok) return false
     const { token } = (await tokenResp.json()) as { token: string }
 
     const manifestResp = await fetch(
-      `https://ghcr.io/v2/learnhouse/app/manifests/${version}`,
+      `https://ghcr.io/v2/williammuigai612-cell/learnorbit/manifests/${version}`,
       {
         signal: AbortSignal.timeout(5000),
         headers: {
@@ -148,6 +148,52 @@ export async function updateCommand(options: { version?: string; migrate?: boole
     warn: (m: string) => p.log.warn(m),
   }
   const s = p.spinner()
+
+  // Resolve a deployment-pinned target BEFORE anything is written. The compose
+  // rewrite further down is permanent, so a tag that does not exist has to fail
+  // while docker-compose.yml still pins the image this install is running —
+  // otherwise `update --to <bad-tag>` exits 1 and leaves the deployment
+  // pointing at an image that cannot be pulled, which the next `up` cannot
+  // start. The upstream path already had this ordering (its registry lookup
+  // runs before the rewrite); the custom path deliberately makes no registry
+  // request, so the pull itself does the resolving. It is the same fetch
+  // `docker compose pull` performs later, just done while it is still undoable.
+  let customTargetImage: string | undefined
+  if (hasCustomImage) {
+    customTargetImage = `${imageRepository}:${targetVersion || 'latest'}`
+    if (!targetVersion) {
+      p.log.warn(
+        `No --to version given, so this targets ${imageRepository}:latest. ` +
+          'Deployments that publish only immutable version tags should pass --to <version>.',
+      )
+    }
+    // `targetVersion` is already validated above; the repository half comes from
+    // learnhouse.config.json, which `setup` validated but a hand edit could not.
+    // Vet the whole reference before it reaches a shell.
+    const refErr = validateImageReference(customTargetImage)
+    if (refErr) {
+      p.log.error(`Refusing to update — ${refErr}`)
+      process.exit(1)
+      return
+    }
+    s.start(`Resolving ${customTargetImage}`)
+    try {
+      dockerPullImage(customTargetImage, config.installDir)
+      s.stop(`Pulled ${customTargetImage}`)
+    } catch {
+      s.stop('Image could not be pulled')
+      p.log.error(
+        `Could not pull ${customTargetImage} — refusing to update.\n` +
+          `Nothing was changed: docker-compose.yml still pins the image this ` +
+          `deployment is running, and there was no backup, restart or migration. ` +
+          `Check the tag exists in ${imageRepository} (and that you are logged in ` +
+          `to its registry), then re-run.`,
+      )
+      process.exit(1)
+      return
+    }
+  }
+
   try {
     // 1) Back up the database first (safety net for migrations) — works for the
     //    in-container db AND an external one via the .env string.
@@ -170,18 +216,13 @@ export async function updateCommand(options: { version?: string; migrate?: boole
 
     // Resolve the target image tag
     let targetImage: string
-    if (hasCustomImage) {
+    if (customTargetImage) {
       // Deliberately no registry probe: resolveTag() only knows how to ask
-      // about ghcr.io/learnhouse/app, and asking it about a custom repository
+      // about ghcr.io/williammuigai612-cell/learnorbit, and asking it about a custom repository
       // would either 404 a valid version or, worse, hand back the upstream
-      // image. The repository never changes here — only the tag does.
-      targetImage = `${imageRepository}:${targetVersion || 'latest'}`
-      if (!targetVersion) {
-        p.log.warn(
-          `No --to version given, so this targets ${imageRepository}:latest. ` +
-            'Deployments that publish only immutable version tags should pass --to <version>.',
-        )
-      }
+      // image. The repository never changes here — only the tag does. The tag
+      // was already resolved (and pulled) by the pre-flight above.
+      targetImage = customTargetImage
     } else if (targetVersion) {
       s.start(`Checking if v${targetVersion} exists`)
       const exists = await resolveTag(targetVersion)
@@ -191,7 +232,7 @@ export async function updateCommand(options: { version?: string; migrate?: boole
         if (!existsWithV) {
           s.stop('Version not found')
           p.log.error(
-            `Version ${targetVersion} not found on ghcr.io/learnhouse/app`,
+            `Version ${targetVersion} not found on ghcr.io/williammuigai612-cell/learnorbit`,
           )
           process.exit(1)
         }

@@ -336,3 +336,123 @@ describe('update — security regressions (appImage)', () => {
     expect(compose()).toBe(before)
   })
 })
+
+// ─── update --to <tag that does not exist> ──────────────────────
+//
+// The production bug: on a deployment-pinned image the compose file was
+// rewritten to the requested tag *before* anything checked that the tag could
+// be pulled. `docker compose pull` then failed, the command exited 1 — and the
+// installation was left permanently pinned to an image that does not exist, so
+// the next `up` had nothing to start. Failing must leave the install exactly
+// as it was.
+
+describe('update — an unresolvable custom image leaves the install untouched', () => {
+  const LO = 'ghcr.io/williammuigai612-cell/learnorbit'
+  const BAD = '0.0.0-nonexistent'
+  let home: string
+  let installDir: string
+  let origHome: string | undefined
+
+  const write = (cfgExtra: Record<string, unknown>, composeImage: string) => {
+    fs.writeFileSync(path.join(installDir, 'learnhouse.config.json'), JSON.stringify({
+      version: '1.4.0', deploymentId: 'dep1', createdAt: '2026-01-01T00:00:00Z',
+      installDir, domain: 'localhost', httpPort: 8080,
+      useHttps: false, autoSsl: false, useExternalDb: false, orgSlug: 'default',
+      ...cfgExtra,
+    }))
+    fs.writeFileSync(path.join(installDir, 'docker-compose.yml'),
+      `name: learnhouse-dep1\nservices:\n  learnhouse-app:\n    image: ${composeImage}\n  db:\n    image: pgvector/pgvector:pg16\n`)
+  }
+  const compose = () => fs.readFileSync(path.join(installDir, 'docker-compose.yml'), 'utf-8')
+  const ranCommands = async () => {
+    const { execSync } = await import('node:child_process')
+    return vi.mocked(execSync).mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
+  }
+  // A registry that does not have `tag`. Both ways of asking for it fail — the
+  // direct `docker pull repo:tag`, and the `docker compose pull` that resolves
+  // whatever docker-compose.yml currently pins. The second arm is what makes
+  // this a regression test rather than a test of the new code path: on the old
+  // ordering the compose file was already rewritten by the time compose pull
+  // ran, so the failure arrived too late to be undone. Everything else docker
+  // is asked to do still succeeds, isolating "this image cannot be resolved"
+  // from "docker is broken".
+  const registryRejects = async (tag: string) => {
+    const { execSync } = await import('node:child_process')
+    vi.mocked(execSync).mockImplementation(((cmd: string) => {
+      const c = String(cmd)
+      const unknown = () => {
+        throw new Error(`manifest unknown: manifest tagged "${tag}" not found`)
+      }
+      if (c.startsWith('docker pull ') && c.includes(tag)) unknown()
+      if (c.includes('docker compose pull') && compose().includes(tag)) unknown()
+      return Buffer.from('')
+    }) as never)
+  }
+  const dockerAlwaysSucceeds = async () => {
+    const { execSync } = await import('node:child_process')
+    vi.mocked(execSync).mockReset()
+    vi.mocked(execSync).mockImplementation((() => Buffer.from('')) as never)
+  }
+
+  beforeEach(async () => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-updpull-'))
+    installDir = path.join(home, '.learnhouse', 'test')
+    fs.mkdirSync(installDir, { recursive: true })
+    fs.writeFileSync(path.join(installDir, '.env'), 'LEARNHOUSE_DOMAIN=localhost\n')
+    origHome = process.env.HOME
+    process.env.HOME = home
+    migMock.status = 'already_mounted'
+    await dockerAlwaysSucceeds()
+    vi.spyOn(process, 'exit').mockImplementation(((c?: number) => { throw new Error(`exit ${c}`) }) as never)
+  })
+  afterEach(async () => {
+    if (origHome === undefined) delete process.env.HOME; else process.env.HOME = origHome
+    fs.rmSync(home, { recursive: true, force: true })
+    // Hand the shared module mock back in its default (always-succeeds) state.
+    await dockerAlwaysSucceeds()
+    vi.restoreAllMocks()
+  })
+
+  it('fails when the requested version does not exist', async () => {
+    write({ appImage: LO }, `${LO}:1.0.1`)
+    await registryRejects(BAD)
+    await expect(
+      updateCommand({ version: BAD, backup: false, migrate: false }),
+    ).rejects.toThrow(/exit 1/)
+  })
+
+  it('leaves docker-compose.yml byte-identical after that failure', async () => {
+    write({ appImage: LO }, `${LO}:1.0.1`)
+    const before = compose()
+    await registryRejects(BAD)
+    await expect(
+      updateCommand({ version: BAD, backup: false, migrate: false }),
+    ).rejects.toThrow(/exit 1/)
+    expect(compose()).toBe(before)
+    expect(compose()).toContain(`image: ${LO}:1.0.1`)
+    expect(compose()).not.toContain(BAD)
+  })
+
+  it('does not restart or migrate after that failure', async () => {
+    write({ appImage: LO }, `${LO}:1.0.1`)
+    await registryRejects(BAD)
+    await expect(
+      updateCommand({ version: BAD, backup: false, migrate: false }),
+    ).rejects.toThrow(/exit 1/)
+    const ran = await ranCommands()
+    expect(ran).toContain(`docker pull ${LO}:${BAD}`)
+    expect(ran).not.toMatch(/docker compose pull/)
+    expect(ran).not.toMatch(/docker compose (up|down)/)
+    expect(ran).not.toMatch(/alembic/)
+  })
+
+  it('still updates when the image resolves', async () => {
+    write({ appImage: LO }, `${LO}:1.0.1`)
+    await updateCommand({ version: '1.0.2', backup: false, migrate: false })
+    expect(compose()).toContain(`image: ${LO}:1.0.2`)
+    expect(compose()).toContain('image: pgvector/pgvector:pg16')
+    const ran = await ranCommands()
+    expect(ran).toContain(`docker pull ${LO}:1.0.2`)
+    expect(ran).toContain('docker compose up -d')
+  })
+})

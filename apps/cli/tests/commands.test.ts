@@ -2594,7 +2594,7 @@ describe('setup / update in-process', () => {
     }))
     fs.writeFileSync(path.join(dir, '.env'), 'LEARNHOUSE_DOMAIN=localhost\n')
     fs.writeFileSync(path.join(dir, 'docker-compose.yml'),
-      'name: learnhouse-dep1\nservices:\n  learnhouse-app:\n    image: ghcr.io/learnhouse/app:1.4.0\n    container_name: learnhouse-app-dep1\n    networks:\n      - n\nnetworks:\n  n:\n')
+      'name: learnhouse-dep1\nservices:\n  learnhouse-app:\n    image: ghcr.io/williammuigai612-cell/learnorbit:1.4.0\n    container_name: learnhouse-app-dep1\n    networks:\n      - n\nnetworks:\n  n:\n')
 
     // EE readiness probe reports a non-ee state → the flow warns but completes.
     healthMock.waitForEeReady.mockResolvedValue('timeout')
@@ -2604,7 +2604,7 @@ describe('setup / update in-process', () => {
 
     // The compose tag was rewritten to :latest (offline fallback).
     expect(fs.readFileSync(path.join(dir, 'docker-compose.yml'), 'utf-8'))
-      .toContain('ghcr.io/learnhouse/app:latest')
+      .toContain('ghcr.io/williammuigai612-cell/learnorbit:latest')
   })
 
   it('setup --ci EE with external DB and Cloudflare DNS generates config', async () => {
@@ -2814,7 +2814,7 @@ describe('setup / update in-process', () => {
     }))
     fs.writeFileSync(path.join(dir, '.env'), 'LEARNHOUSE_DOMAIN=localhost\n')
     fs.writeFileSync(path.join(dir, 'docker-compose.yml'),
-      'name: learnhouse-dep1\nservices:\n  learnhouse-app:\n    image: ghcr.io/learnhouse/app:1.4.0\n    container_name: learnhouse-app-dep1\n    networks:\n      - n\nnetworks:\n  n:\n')
+      'name: learnhouse-dep1\nservices:\n  learnhouse-app:\n    image: ghcr.io/williammuigai612-cell/learnorbit:1.4.0\n    container_name: learnhouse-app-dep1\n    networks:\n      - n\nnetworks:\n  n:\n')
 
     // resolveTag fetches a GHCR token then the manifest — make both succeed.
     vi.spyOn(globalThis, 'fetch').mockImplementation((async (u: unknown) =>
@@ -2824,7 +2824,7 @@ describe('setup / update in-process', () => {
 
     await expect(updateCommand({ version: '1.2.6', backup: false, migrate: false })).resolves.toBeUndefined()
     expect(fs.readFileSync(path.join(dir, 'docker-compose.yml'), 'utf-8'))
-      .toContain('ghcr.io/learnhouse/app:1.2.6')
+      .toContain('ghcr.io/williammuigai612-cell/learnorbit:1.2.6')
   })
 })
 

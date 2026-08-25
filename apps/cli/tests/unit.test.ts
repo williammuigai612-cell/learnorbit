@@ -108,7 +108,7 @@ describe('generateDockerCompose', () => {
 
   it('uses default APP_IMAGE when no image provided', () => {
     const yml = generateDockerCompose(baseConfig)
-    expect(yml).toContain('ghcr.io/learnhouse/app:')
+    expect(yml).toContain('ghcr.io/williammuigai612-cell/learnorbit:')
   })
 
   it('mounts a content volume on filesystem delivery', () => {
@@ -639,9 +639,9 @@ describe('validateEmail — reserved TLDs', () => {
 
 describe('update — image tag replacement in docker-compose.yml', () => {
   it('replaces a pinned version tag (1.2.2 → 1.2.6)', () => {
-    const compose = 'image: ghcr.io/learnhouse/app:1.2.2'
-    expect(replaceComposeImageTag(compose, 'ghcr.io/learnhouse/app:1.2.6')).toBe(
-      'image: ghcr.io/learnhouse/app:1.2.6',
+    const compose = 'image: ghcr.io/williammuigai612-cell/learnorbit:1.2.2'
+    expect(replaceComposeImageTag(compose, 'ghcr.io/williammuigai612-cell/learnorbit:1.2.6')).toBe(
+      'image: ghcr.io/williammuigai612-cell/learnorbit:1.2.6',
     )
   })
 
@@ -649,48 +649,48 @@ describe('update — image tag replacement in docker-compose.yml', () => {
     const compose = [
       'services:',
       '  learnhouse-app:',
-      '    image: ghcr.io/learnhouse/app:1.2.2',
+      '    image: ghcr.io/williammuigai612-cell/learnorbit:1.2.2',
       '    restart: unless-stopped',
     ].join('\n')
-    const updated = replaceComposeImageTag(compose, 'ghcr.io/learnhouse/app:1.2.6')
-    expect(updated).toContain('image: ghcr.io/learnhouse/app:1.2.6')
+    const updated = replaceComposeImageTag(compose, 'ghcr.io/williammuigai612-cell/learnorbit:1.2.6')
+    expect(updated).toContain('image: ghcr.io/williammuigai612-cell/learnorbit:1.2.6')
     expect(updated).not.toContain(':1.2.2')
   })
 
   it('handles v-prefixed version tags', () => {
-    const compose = 'image: ghcr.io/learnhouse/app:v1.2.2'
-    expect(replaceComposeImageTag(compose, 'ghcr.io/learnhouse/app:v1.2.6')).toBe(
-      'image: ghcr.io/learnhouse/app:v1.2.6',
+    const compose = 'image: ghcr.io/williammuigai612-cell/learnorbit:v1.2.2'
+    expect(replaceComposeImageTag(compose, 'ghcr.io/williammuigai612-cell/learnorbit:v1.2.6')).toBe(
+      'image: ghcr.io/williammuigai612-cell/learnorbit:v1.2.6',
     )
   })
 
   it('handles latest tag (no-version update path)', () => {
-    const compose = 'image: ghcr.io/learnhouse/app:latest'
+    const compose = 'image: ghcr.io/williammuigai612-cell/learnorbit:latest'
     // When no --version is specified the tag stays "latest" but the explicit
     // docker compose pull that now precedes `up` fetches the actual new digest.
-    expect(replaceComposeImageTag(compose, 'ghcr.io/learnhouse/app:latest')).toBe(
-      'image: ghcr.io/learnhouse/app:latest',
+    expect(replaceComposeImageTag(compose, 'ghcr.io/williammuigai612-cell/learnorbit:latest')).toBe(
+      'image: ghcr.io/williammuigai612-cell/learnorbit:latest',
     )
   })
 
   it('handles dev channel tag', () => {
-    const compose = 'image: ghcr.io/learnhouse/app:dev'
-    expect(replaceComposeImageTag(compose, 'ghcr.io/learnhouse/app:1.3.0')).toBe(
-      'image: ghcr.io/learnhouse/app:1.3.0',
+    const compose = 'image: ghcr.io/williammuigai612-cell/learnorbit:dev'
+    expect(replaceComposeImageTag(compose, 'ghcr.io/williammuigai612-cell/learnorbit:1.3.0')).toBe(
+      'image: ghcr.io/williammuigai612-cell/learnorbit:1.3.0',
     )
   })
 
   it('does not modify other images in the compose file', () => {
     const compose = [
       '  learnhouse-app:',
-      '    image: ghcr.io/learnhouse/app:1.2.2',
+      '    image: ghcr.io/williammuigai612-cell/learnorbit:1.2.2',
       '  db:',
       '    image: pgvector/pgvector:pg16',
       '  nginx:',
       '    image: nginx:alpine',
     ].join('\n')
-    const updated = replaceComposeImageTag(compose, 'ghcr.io/learnhouse/app:1.2.6')
-    expect(updated).toContain('image: ghcr.io/learnhouse/app:1.2.6')
+    const updated = replaceComposeImageTag(compose, 'ghcr.io/williammuigai612-cell/learnorbit:1.2.6')
+    expect(updated).toContain('image: ghcr.io/williammuigai612-cell/learnorbit:1.2.6')
     expect(updated).toContain('image: pgvector/pgvector:pg16')
     expect(updated).toContain('image: nginx:alpine')
   })
@@ -1858,14 +1858,14 @@ describe('resolveAppImage', () => {
   it('maps the dev channel to the dev image without any network call', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const res = await resolveAppImage('dev')
-    expect(res).toEqual({ image: 'ghcr.io/learnhouse/app:dev', isLatest: false })
+    expect(res).toEqual({ image: 'ghcr.io/williammuigai612-cell/learnorbit:dev', isLatest: false })
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('falls back to :latest when the network fails', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
     const res = await resolveAppImage('stable')
-    expect(res).toEqual({ image: 'ghcr.io/learnhouse/app:latest', isLatest: true })
+    expect(res).toEqual({ image: 'ghcr.io/williammuigai612-cell/learnorbit:latest', isLatest: true })
   })
 
   it('pins the newest non-draft release when its image manifest exists', async () => {
@@ -1881,7 +1881,7 @@ describe('resolveAppImage', () => {
       return new Response('', { status: 200 }) // manifest exists
     })
     const res = await resolveAppImage('stable')
-    expect(res).toEqual({ image: 'ghcr.io/learnhouse/app:1.4.2', isLatest: false })
+    expect(res).toEqual({ image: 'ghcr.io/williammuigai612-cell/learnorbit:1.4.2', isLatest: false })
   })
 
   it('falls back to :latest when the release exists but its image manifest is missing', async () => {
@@ -1894,7 +1894,7 @@ describe('resolveAppImage', () => {
       return new Response('', { status: 404 }) // manifest missing
     })
     const res = await resolveAppImage('stable')
-    expect(res).toEqual({ image: 'ghcr.io/learnhouse/app:latest', isLatest: true })
+    expect(res).toEqual({ image: 'ghcr.io/williammuigai612-cell/learnorbit:latest', isLatest: true })
   })
 })
 
@@ -2624,11 +2624,11 @@ describe('checkTcpConnection — timeout', () => {
 describe('compose-utils — parameterised repository', () => {
   const LO = 'ghcr.io/williammuigai612-cell/learnorbit'
 
-  it('defaults to the upstream repository when none is given', () => {
-    expect(DEFAULT_APP_IMAGE_REPOSITORY).toBe('ghcr.io/learnhouse/app')
-    const compose = 'image: ghcr.io/learnhouse/app:1.2.2'
-    expect(replaceComposeImageTag(compose, 'ghcr.io/learnhouse/app:1.2.6')).toBe(
-      'image: ghcr.io/learnhouse/app:1.2.6',
+  it('defaults to the LearnOrbit repository when none is given', () => {
+    expect(DEFAULT_APP_IMAGE_REPOSITORY).toBe('ghcr.io/williammuigai612-cell/learnorbit')
+    const compose = 'image: ghcr.io/williammuigai612-cell/learnorbit:1.2.2'
+    expect(replaceComposeImageTag(compose, 'ghcr.io/williammuigai612-cell/learnorbit:1.2.6')).toBe(
+      'image: ghcr.io/williammuigai612-cell/learnorbit:1.2.6',
     )
   })
 
@@ -2806,10 +2806,10 @@ describe('compose-utils — only real image: entries count (HIGH-1)', () => {
     )
   })
 
-  it('still handles the plain upstream form unchanged', () => {
+  it('still handles the plain default form unchanged', () => {
     expect(
-      replaceComposeImageTag('image: ghcr.io/learnhouse/app:1.2.2', 'ghcr.io/learnhouse/app:1.2.6'),
-    ).toBe('image: ghcr.io/learnhouse/app:1.2.6')
+      replaceComposeImageTag('image: ghcr.io/williammuigai612-cell/learnorbit:1.2.2', 'ghcr.io/williammuigai612-cell/learnorbit:1.2.6'),
+    ).toBe('image: ghcr.io/williammuigai612-cell/learnorbit:1.2.6')
   })
 })
 

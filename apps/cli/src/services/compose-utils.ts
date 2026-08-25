@@ -6,7 +6,7 @@
  * default for every entry point here, so an installation whose config carries
  * no `appImage` behaves exactly as it always has.
  */
-export const DEFAULT_APP_IMAGE_REPOSITORY = 'ghcr.io/learnhouse/app'
+export const DEFAULT_APP_IMAGE_REPOSITORY = 'ghcr.io/williammuigai612-cell/learnorbit'
 
 /**
  * Raised when the compose file carries no image for the repository the caller

@@ -94,7 +94,7 @@ describe('CLI integration — live install (command coverage)', () => {
   describe('setup --ci generates correct config files', () => {
     it('writes docker-compose.yml with the app image, pgvector and nginx', () => {
       const compose = fs.readFileSync(path.join(installDir, 'docker-compose.yml'), 'utf-8')
-      expect(compose).toContain('ghcr.io/learnhouse/app:')
+      expect(compose).toContain('ghcr.io/williammuigai612-cell/learnorbit:')
       expect(compose).toContain('pgvector')
       expect(compose).toContain('nginx')
       expect(compose).toContain(`container_name: learnhouse-app-${deploymentId}`)
@@ -483,6 +483,7 @@ describe('CLI integration — upgrade (old → new image)', () => {
         `--port ${INTEG_PORT}`,
         `--admin-email ${TEST_ADMIN_EMAIL}`,
         `--admin-password ${TEST_ADMIN_PASSWORD}`,
+        `--image ${GHCR}:${OLD_VERSION}`,
         '--no-start',
       ].join(' '),
       60_000,
@@ -493,10 +494,15 @@ describe('CLI integration — upgrade (old → new image)', () => {
       fs.readFileSync(path.join(installDir, 'learnhouse.config.json'), 'utf-8'),
     ).deploymentId
 
-    // Pin the OLD image so we start from a known-stale version.
+    // `--image` above already pinned the OLD upstream image at install time, so
+    // no compose rewrite is needed. Guard it rather than assume it: the previous
+    // regex silently matched nothing once the production default stopped being
+    // ghcr.io/learnhouse/app, which is how this test came to depend on that
+    // default. This section must pin upstream explicitly and fail loudly if it
+    // ever stops doing so.
     const composePath = path.join(installDir, 'docker-compose.yml')
-    fs.writeFileSync(composePath, fs.readFileSync(composePath, 'utf-8').replace(
-      /image:\s*ghcr\.io\/learnhouse\/app:\S+/, `image: ${GHCR}:${OLD_VERSION}`))
+    if (!fs.readFileSync(composePath, 'utf-8').includes(`image: ${GHCR}:${OLD_VERSION}`))
+      throw new Error(`setup did not pin ${GHCR}:${OLD_VERSION} via --image`)
 
     composeUp(installDir)
 
