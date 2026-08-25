@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -11,6 +12,19 @@ from src.services.utils.ssrf_guard import (
     assert_connected_peer_allowed,
     resolve_and_validate_url,
 )
+
+logger = logging.getLogger(__name__)
+
+# SECURITY: one fixed, reason-free message for *every* SSRF-guard rejection.
+# The guard's own exception text names the internal detail that got the URL
+# blocked — the private/reserved address a hostname resolved to, or the peer
+# set a rebinding attempt was measured against. Returning that to the caller
+# turns this endpoint into an internal-network oracle: point it at a host and
+# read the topology back out of the error. Varying the message by cause
+# (blocked scheme vs. blocked hostname vs. blocked range vs. rebinding) leaks
+# the same thing more slowly, so all four collapse to this one string. The
+# real reason goes to the server log instead.
+_BLOCKED_URL_DETAIL = "This URL cannot be previewed"
 
 _MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5MB
 _MAX_REDIRECTS = 5
@@ -95,14 +109,19 @@ async def _fetch_html(url: str) -> Optional[str]:
             try:
                 validated_ips = resolve_and_validate_url(current_url)
             except SSRFBlockedError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
+                # Diagnostics stay server-side; the client gets the generic
+                # message only. Same shape as webhooks/dispatch.py's
+                # "SSRF guard: …" logging.
+                logger.warning("Link preview blocked by SSRF guard: %s", exc)
+                raise HTTPException(status_code=400, detail=_BLOCKED_URL_DETAIL)
 
             try:
                 async with client.stream("GET", current_url) as response:
                     try:
                         assert_connected_peer_allowed(response, validated_ips)
                     except SSRFBlockedError as exc:
-                        raise HTTPException(status_code=400, detail=str(exc))
+                        logger.warning("Link preview blocked by SSRF guard: %s", exc)
+                        raise HTTPException(status_code=400, detail=_BLOCKED_URL_DETAIL)
 
                     if response.is_redirect:
                         redirect_url = (

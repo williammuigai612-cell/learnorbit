@@ -7,9 +7,13 @@ Rate limits:
 - Verification resend: 5 attempts per 5 minutes per email
 """
 import ipaddress
-from typing import Tuple
+import logging
+import time
+from typing import Optional, Tuple
 from fastapi import HTTPException, Request
 from src.core.redis import get_redis_client as _get_redis_pool_client
+
+logger = logging.getLogger(__name__)
 
 
 class RateLimitExceeded(Exception):
@@ -508,6 +512,170 @@ def enforce_ai_rate_limit(user_id: int, org_id: int) -> None:
             detail={
                 "code": "RATE_LIMITED",
                 "message": "Too many AI requests. Please slow down.",
+                "retry_after": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+# ---------------------------------------------------------------------------
+# LearnOrbit engagement / mutation rate limits (SECURITY_REVIEW F2, §21 / §22)
+# ---------------------------------------------------------------------------
+#
+# The helpers above cover the inherited LearnHouse surface (auth, AI, invites,
+# admin API). LearnOrbit's own mutation endpoints — comments, follows, likes,
+# saves, shares, reports, channel content, quiz attempts, parent links — had no
+# ceiling at all, so uncontrolled repetition was a spam and resource-exhaustion
+# vector. This table is the single place those ceilings are declared; routers
+# name an action, never a raw key, so a bucket cannot drift per endpoint.
+#
+# ``(max_attempts, window_seconds)`` per action. Sized so a fast, legitimate
+# human stays well under the line and only automation crosses it:
+#
+# * ``follow_toggle``      60/min  — following while browsing a channel list.
+# * ``reaction_toggle``   120/min  — likes and saves share a bucket; a Shorts
+#                                    scroller reacting twice a second is already
+#                                    past what a person does.
+# * ``share_create``       60/min  — shares are append-only and each one bumps a
+#                                    public counter, so this is the count-
+#                                    inflation vector, not an idempotent toggle.
+# * ``comment_write``      20/min  — create/edit/delete. The top spam vector, and
+#                                    20 comments a minute is far beyond typing.
+# * ``report_create``      10/hour — reports land in a human moderation queue;
+#                                    flooding that queue is the abuse.
+# * ``moderation_write``   60/min  — report resolution by channel admins; bulk
+#                                    triage stays comfortable.
+# * ``content_write``      60/min  — channel video / resource / question / quiz
+#                                    CRUD by owners+admins. A teacher authoring
+#                                    a question bank stays under one per second.
+# * ``quiz_attempt_start`` 30/hour — each start writes an attempt row. Submitting
+#                                    is deliberately *not* limited: an attempt
+#                                    can only be submitted once (409 after that),
+#                                    so attempt creation already bounds it, and a
+#                                    429 on submit would lose a student's work.
+# * ``parent_link_write``  10/hour — a link request notifies another real person,
+#                                    so it is a harassment/spam vector.
+LEARNORBIT_RATE_LIMITS: dict[str, Tuple[int, int]] = {
+    "follow_toggle": (60, 60),
+    "reaction_toggle": (120, 60),
+    "share_create": (60, 60),
+    "comment_write": (20, 60),
+    "report_create": (10, 60 * 60),
+    "moderation_write": (60, 60),
+    "content_write": (60, 60),
+    "quiz_attempt_start": (30, 60 * 60),
+    "parent_link_write": (10, 60 * 60),
+}
+
+# Anonymous callers get an IP-keyed bucket capped at this, never looser than
+# the per-user ceiling. Every endpoint below rejects anonymous callers anyway
+# (401/403 from the service), so this only has to stop an unauthenticated flood
+# from reaching the DB — a tight cap costs no legitimate user anything.
+LEARNORBIT_ANON_MAX_ATTEMPTS = 20
+
+# When Redis is unreachable, stop asking for this long instead of paying a
+# connect timeout on every request. Mirrors the "Redis is optional" contract in
+# ``src/core/redis.py``.
+LEARNORBIT_REDIS_BACKOFF_SECONDS = 30.0
+
+_learnorbit_redis_down_until: float = 0.0
+
+
+def reset_learnorbit_rate_limit_state() -> None:
+    """Clear the Redis-unavailable backoff (used in tests)."""
+    global _learnorbit_redis_down_until
+    _learnorbit_redis_down_until = 0.0
+
+
+def check_learnorbit_rate_limit(
+    action: str,
+    *,
+    user_id: Optional[int] = None,
+    request: Optional[Request] = None,
+) -> Tuple[bool, int]:
+    """Check the LearnOrbit bucket for ``action``.
+
+    Keyed on ``(action, identity)`` only — never on org/video/comment ids —
+    so re-pointing the same abusive action at a different target does not
+    reset the counter. Authenticated callers get a per-user bucket (API tokens
+    resolve to their creator upstream); anonymous callers fall back to a
+    tighter per-IP bucket so they cannot bypass the limit by not logging in.
+
+    Fails **open** if Redis is unavailable: these are engagement endpoints, and
+    taking comments/likes/follows down whenever the cache tier blinks would be
+    a worse outcome than the abuse the ceiling prevents. The auth-side helpers
+    above keep their own stricter behaviour. Ownership, RBAC and the DB
+    uniqueness constraints on likes/saves/follows all still apply.
+
+    Returns ``(is_allowed, retry_after_seconds)``.
+    """
+    global _learnorbit_redis_down_until
+
+    try:
+        max_attempts, window_seconds = LEARNORBIT_RATE_LIMITS[action]
+    except KeyError:
+        raise ValueError(f"Unknown LearnOrbit rate-limit action: {action!r}")
+
+    if user_id:
+        key = f"lo:{action}:user:{user_id}"
+    else:
+        ip = get_client_ip(request) if request is not None else "unknown"
+        key = f"lo:{action}:ip:{ip}"
+        max_attempts = min(max_attempts, LEARNORBIT_ANON_MAX_ATTEMPTS)
+
+    if time.monotonic() < _learnorbit_redis_down_until:
+        return True, window_seconds
+
+    try:
+        is_allowed, _count, retry_after = check_rate_limit(
+            key=key,
+            max_attempts=max_attempts,
+            window_seconds=window_seconds,
+        )
+    except Exception:
+        _learnorbit_redis_down_until = time.monotonic() + LEARNORBIT_REDIS_BACKOFF_SECONDS
+        logger.warning(
+            "LearnOrbit rate limiting degraded — Redis unavailable (action=%s)",
+            action,
+            exc_info=True,
+        )
+        return True, window_seconds
+
+    return is_allowed, retry_after
+
+
+def enforce_learnorbit_rate_limit(
+    action: str,
+    current_user=None,
+    request: Optional[Request] = None,
+) -> None:
+    """Raise HTTP 429 if ``current_user`` has exceeded the bucket for ``action``.
+
+    Uses the shared ``{"code": "RATE_LIMITED", ...}`` envelope and a
+    ``Retry-After`` header, so the frontend's existing 429 handling applies
+    unchanged. The message is deliberately generic — it names neither the
+    caller, the bucket, nor the backing store.
+    """
+    user_id = 0
+    if current_user is not None:
+        # Local import: src.security.auth pulls in config/db at module load,
+        # and this module is imported from it transitively.
+        from src.security.auth import resolve_acting_user_id
+
+        try:
+            user_id = resolve_acting_user_id(current_user) or 0
+        except AttributeError:
+            user_id = 0
+
+    is_allowed, retry_after = check_learnorbit_rate_limit(
+        action, user_id=user_id, request=request
+    )
+    if not is_allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "RATE_LIMITED",
+                "message": "Too many requests. Please slow down and try again shortly.",
                 "retry_after": retry_after,
             },
             headers={"Retry-After": str(retry_after)},

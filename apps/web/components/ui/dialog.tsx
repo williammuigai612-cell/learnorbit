@@ -92,13 +92,22 @@ const DialogHeader = ({
 )
 DialogHeader.displayName = "DialogHeader"
 
+// Phase 9D (M7): the column-reverse stack had no gap at all, so below `sm`
+// the two buttons touched (measured 0px at 360x640 and 390x844).
+// `gap-y-2`/`sm:gap-y-0` rather than the more obvious `gap-2`/`sm:gap-0`:
+// five callers pass their own unprefixed `gap-2` (the `mt-5 gap-2` footers in
+// home.tsx, account/page.tsx and AccountDangerZone.tsx, plus Modal.tsx), and
+// twMerge keeps a caller's `gap-2` *alongside* a base `sm:gap-0` — which
+// measured an 8px desktop regression for those five (20px -> 12px between
+// buttons). Scoping the gap to the row axis fixes the stack and is inert in a
+// single-row flex, so every desktop measurement stayed identical.
 const DialogFooter = ({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-3",
+      "flex flex-col-reverse gap-y-2 sm:flex-row sm:justify-end sm:space-x-3 sm:gap-y-0",
       className
     )}
     {...props}

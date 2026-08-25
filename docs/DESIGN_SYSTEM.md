@@ -228,6 +228,20 @@ Elevation hierarchy in dark mode now reads: `--background` (darkest) → `--card
   token** (§24).
 - Contrast requirement: every foreground/background pairing above meets WCAG AA (4.5:1 for text, 3:1 for large
   text/UI components) in both modes — verify any new token addition against this bar before adding it.
+- **Exception — `--success` and `--warning` are fill/icon tokens, not text tokens.** The Phase 9C
+  accessibility review measured them on `--background` in light mode and found `--success` at **3.31:1** and
+  `--warning` at **2.16:1** — both below the 4.5:1 text floor (`--warning` is below the 3:1 UI floor too). They
+  remain correct for fills, borders and icons, which only need 3:1. For **text** in those states use the
+  companion tokens added in 9C:
+
+  | Token | Light | Contrast on `--background` | Use for |
+  |---|---|---|---|
+  | `--success-strong` | `142.4 71.8% 29.2%` | 5.02:1 | success **text** (badges, labels) |
+  | `--warning-strong` | `26 90.5% 37.1%` | 5.05:1 | warning **text** (badges, exam timer) |
+
+  In dark mode the relationship inverts — the base tokens are already the readable ones — so the `-strong`
+  variants are defined lighter there. No dark theme ships in V1; the pair is kept coherent for when one does.
+  Consumed as `text-success-strong` / `text-warning-strong`. Enforced by `apps/web/tests/a11y-guard.test.mjs`.
 
 ---
 

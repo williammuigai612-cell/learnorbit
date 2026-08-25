@@ -12,9 +12,26 @@
 - [x] Original LearnHouse web application opens locally
 
 ## Current Phase
-**Phase 8 — Trust & Moderation: COMPLETE.** 8A (Reporting), 8B (Content moderation workflow), 8C
-(Teacher/organization verification), and 8D (Basic admin tools) are all complete. Phases 1–8 are done. Next:
-Phase 9 — V1 Hardening. Not started; do not begin automatically.
+**Phase 9 — V1 Hardening: IN PROGRESS.** 9A (Security review), 9B (Performance review), 9C (Accessibility
+review), 9D (Mobile-responsive polish) and 9E (Testing) are all complete. 9D landed M1–M8 across three
+batches, every one live-verified; **M9 is intentionally deferred** under 9C's existing Low-findings decision.
+9E added 18 backend and 48 frontend tests across four increments — exam-integrity IDOR/answer-key regression
+tests, per-channel follow isolation, a cross-feature moderation→discovery integration file, and a query-key
+cache-isolation guard — every security assertion mutation-checked, and **no implementation code changed**
+(no new defect was found; G1–G6 were gaps in coverage, not in the guards). See their entries at the end of
+this file for the full records. Phases 1–8 are done. **9A's F2 rate-limiting increment is now complete**
+(2026-08-24) — see the "F2 — Rate Limiting" entry at the end of this file; `docs/SECURITY_REVIEW.md` has no
+DEFERRED item left except F3 CSRF, which 9F owns. Next: **9F — Deployment plan**, the last Phase 9 item.
+Not started; do not begin automatically. Six items are queued ahead of it if wanted first: seeding a
+published short, a timed exam attempt and a signed-in session to close 9D's four unexercised live checks
+(the Shorts snap geometry, the engagement-bar wrap, the timer over real answer controls, and the dialogs
+with the on-screen keyboard), 9C's runtime keyboard verification of H5/H6, 9C's deferred reduced-motion
+support (M11) and 7 Low findings, 9A's F3 CSRF-middleware decision (belongs
+to 9F itself), 9B's two measurement-gated candidates (the combined engagement endpoint, the Shorts composite
+index), and 9D's declined `interactiveWidget: 'resizes-content'` follow-up (responsive infrastructure, not
+testing — see 9E's deferred list). 9E also recorded, without fixing, a pre-existing test-isolation defect in
+inherited LearnHouse code: `test_active_users.py::TestRecordActivity::test_ee_records` passes only on the
+first run per UTC day per Redis instance (see 9E's Verification section for the mechanism and the fix).
 
 ## Status Snapshot
 - **Infrastructure fix (2026-08-19): both repo-wide dev-environment blockers
@@ -3203,3 +3220,1341 @@ Separate from the product-phase track above; sequenced per `docs/UI_UX_IMPLEMENT
   - **Documentation**: this entry; `docs/ARCHITECTURE.md` gained a new decision entry. `docs/ROADMAP.md`'s
     "Basic admin tools" box is now checked — **Phase 8 is complete.**
     **Next per `docs/ROADMAP.md`: Phase 9 — V1 Hardening.** Not started; do not begin automatically.
+- **Phase 9A (Security review): complete** — an audit of the authorization, data-exposure, and
+  abuse-resistance properties of the API surface LearnOrbit added in Phases 1–8, plus one code fix. Phase 9's
+  roadmap line is a bare six-item list with no sub-definitions and no PRD elaboration (the same
+  underspecification 8C/8D hit), so the increment was scoped during planning and the scope stated before
+  implementation: 9A = "Security review" (roadmap order); audit + fix genuine LearnOrbit defects only; backend
+  deep, frontend shallow; rate limiting identified but not implemented; inherited LearnHouse posture
+  documented, not retrofitted. See docs/ARCHITECTURE.md § "V1 Hardening (Phase 9A)" for the decision record on
+  the one fix.
+  - **Security standard applied — the pre-existing `docs/SECURITY_REVIEW.md` was reviewed as part of this
+    assessment.** That file (present in the working tree but untracked) is the project's own security
+    standard, and 9A used it as the review checklist rather than inventing its own criteria: findings are
+    classified by its severity guidelines (§52), and the audit's depth ordering follows its
+    highest-priority security areas (§55 — authorization first, then organization/tenant isolation), which is
+    why those two got the deepest coverage. The sections covering the audited surface — §5 authorization/IDOR,
+    §6 multi-tenant isolation, §7 API security/mass assignment, §8 input validation, §11 CSRF, §13 file
+    upload, §21 rate limiting, §25 data exposure, §27 user-generated content — are what the "Verified correct"
+    items and findings F1–F6 below map back to. Two of its requirements are the direct source of the two
+    deferred findings: §21 (rate limiting) → F2, and §11 (CSRF) → F3; both remain deferred here, not folded
+    into this increment. Its deployment/infra sections were read and deliberately mapped to later increments
+    rather than audited now — see "Not reviewed in 9A" below.
+  - **Scope audited**: 20 new service modules (`services/orgs/channel_videos|channel_resources|
+    channel_video_{comments,likes,saves,shares,reports}|follows|progress|questions|quizzes|quiz_attempts|
+    verification`, `services/notifications/notifications`, `services/users/{parent_links,child_progress}`), 3
+    new routers (`feed`/`notifications`/`shorts`), the LearnOrbit endpoints on `routers/orgs/orgs.py` and
+    `routers/users.py`, and 13 new `db/` models. Frontend limited to client-only-gating and UGC-rendering
+    checks across the 36 LearnOrbit `services/organizations/*` + `hooks/queries/*` files. Inherited LearnHouse
+    code out of scope except at LearnOrbit call sites.
+  - **Verified correct (no change needed)** — the existing patterns hold:
+    - Every engagement service (likes/saves/shares/comments/reports) routes its visibility decision through
+      `get_channel_video`, so none can be used as an existence oracle for a draft/unlisted/private video.
+    - Answer-key containment is intact on every student-reachable path: `_strip_question` removes `is_correct`
+      from options **and** pops `accepted_answers` (the key for `short_answer`/`number_answer`), and
+      `explanation` is a top-level `Question` column absent from `QuestionForAttempt`. The one endpoint that
+      returns full question `contents` (`list_quiz_questions`) is `_require_channel_admin`-gated.
+    - All six question-bank operations are admin-gated; `_get_*_or_404` helpers are org-scoped throughout, so
+      cross-org isolation holds on every read and mutation.
+    - IDOR guards use 404-not-403 where existence itself is sensitive (`_get_own_pending_link_or_404`,
+      `_require_approved_link`), and `request_parent_link` returns a generic 404 for an unknown username.
+    - PII projection: comments **and** notifications both serialize authors through the pre-existing
+      `UserReadAuthor`, never `UserRead` — no email/`is_superadmin`/raw profile blobs. Notification rows carry
+      ids only, no comment text.
+    - No mass-assignment: `ChannelVideoUpdate`/`ChannelResourceUpdate` exclude `org_id`, `activity_id`,
+      `published`, and `visibility`, so the `exclude_unset` + `setattr` loop cannot repoint a row at another
+      org's content.
+    - No `dangerouslySetInnerHTML` anywhere in the LearnOrbit-added frontend.
+    - PDF upload is correctly delegated: `channel_resources.py` never accepts a file, only an `activity_id`
+      that must already belong to the same org, created through the unmodified validated `documentpdf`
+      endpoint.
+  - **Finding F1 (genuine LearnOrbit gap — FIXED this increment): an APPROVED `ParentChildLink` could never be
+    revoked.** `respond_to_parent_link` rejects non-PENDING links, and no other endpoint mutated an approved
+    one — so once a child approved, the parent retained permanent, cross-org read access to the child's entire
+    quiz history via `get_child_quiz_progress`. Not present in Phase 7B's documented deferral list (which
+    covered UI, push notifications, and 7C wiring only), so a gap rather than an accepted boundary.
+    - **Backend**: new `revoke_parent_link` in `services/users/parent_links.py` (either party may revoke;
+      404-not-403 for a non-party; 400 if the link is not APPROVED; sets `REJECTED`, so no migration and no new
+      enum value) + `POST /users/parent-links/{link_uuid}/revoke` on the existing `users` router.
+    - **Frontend**: `revokeParentLink` service wrapper, `useRevokeParentLink` hook (invalidates both
+      `parentLinks.mine` and `parentLinks.childProgress` so a revoked parent's activity view cannot linger),
+      and a `ConfirmationModal`-wrapped "Remove link" action on each row of the existing `AccountFamily`
+      linked-family list — shown to both sides, with side-specific confirmation copy, reusing the same
+      destructive-action modal pattern as `OrgEditDangerZone`/8D. Without UI the control would exist only for
+      curl, which is not a real control for a student.
+    - **Tests (TDD, RED confirmed before implementation)**: 7 new service tests appended to
+      `test_parent_links_service.py` (child revokes; parent revokes; unrelated user 404 with the link left
+      APPROVED; anonymous 401; non-approved link 400; **revocation immediately cuts off
+      `get_child_quiz_progress`**; re-request after revocation reopens as PENDING and does *not* restore
+      access) + 3 router tests (`TestRevokeParentLink`). The RED run failed first on `ImportError: cannot
+      import name 'revoke_parent_link'`, then on `AttributeError` for the router symbol — both watched to fail
+      before any implementation existed.
+  - **Finding F2 (genuine gap — NOT fixed, deferred by the approved scope): no rate limiting on any LearnOrbit
+    mutation endpoint.** Comments, reports, follows, likes, shares, and `request_parent_link` have no
+    throttling, while a proven `services/security/rate_limiting.py::check_rate_limit` already exists and is
+    used by the AI and auth paths. Concrete impact: report-spam degrades the Phase 8B moderation queue, which
+    has no pagination. **Note for whoever picks this up:** the repo's own untracked `docs/SECURITY_REVIEW.md`
+    §21 explicitly names Comments, Follows, and Uploads as endpoints requiring rate limits — so this is a
+    documented project requirement, not optional polish. Recommended as its own increment (~8 endpoints,
+    introduces a Redis dependency on paths that do not currently have one).
+  - **Finding F3 (pre-existing LearnHouse, low, NOT fixed): the CSRF origin-validation middleware is never
+    registered.** `src/security/csrf.py` defines `CSRFProtectionMiddleware`, but `apps/api/app.py` only calls
+    `register_ee_middlewares`, which no-ops because `is_ee_available()` requires an `ee/hooks.py` that does not
+    exist on the API side of this repo. Auth does fall back to a cookie (`get_token_from_request`), so this
+    would matter — **but `SameSite=Lax` on the JWT cookie (`security/auth.py:80`, `routers/auth.py:194`)
+    blocks cross-site POST/PUT/PATCH/DELETE, which covers every LearnOrbit mutation.** Residual risk is
+    confined to same-registrable-domain scenarios. `apps/api/app.py` is untouched by LearnOrbit (`git diff
+    dev...HEAD` empty), so this is inherited, not introduced. Flagged for 9F (deployment) rather than
+    retrofitted here — wiring app-wide middleware is exactly the "broad architectural change" CLAUDE.md says
+    to report rather than make unilaterally.
+  - **Findings F4–F6 (informational, no action)**: `org_id` is accepted but unused by
+    `update_channel_video_comment`/`delete_channel_video_comment` (the author-ownership check is the real
+    control, so there is no privilege gain — an API-contract wart, not a defect); notification rows persist
+    after an admin loses org access (they carry ids only, no content); and `request_parent_link`'s `is_parent`
+    check is UX, not a security boundary, since the flag is self-declared per Phase 7A — the child's approval
+    is the actual control. All three are correct as designed.
+  - **Verification**: `test_parent_links_service.py` 19 passed; `test_parent_links_router.py` 16 passed;
+    scoped regression across parent-links + child-progress + users router/service: **85 passed, 0 failed**.
+    `uvx ruff@0.15.9` clean on all changed Python. `bunx tsc --noEmit` clean. ESLint `--max-warnings=0` clean
+    on all three changed frontend files. Full `bun test tests`: **174 passed, 13 failed, 2 errors** — the same
+    pre-existing baseline documented since Phase 6/7/8B–8D (`billing-internal-key`, `catalog-pagination`'s
+    missing fixture, the `ar.json` coverage timeout); no regressions, and no frontend test file added (`bun
+    test` covers logic, not thin fetch wrappers — same convention as 8D). `git diff --check` clean.
+  - **Known limitation — no live browser or live API verification this session.** The API dev server was not
+    running and was not started; the revoke path is exercised by the service and router suites only. The
+    standing single-tenancy limitation also means cross-org isolation can only ever be proven via direct API
+    calls with two seeded orgs, not through the browser — the audit's cross-org conclusions rest on reading
+    the org-scoped query predicates plus the existing backend tests, not on a live multi-org smoke test.
+    Stated rather than skipped silently.
+  - **Not reviewed in 9A** (outside the approved scope, mapped to later increments): the deployment/infra
+    sections of `docs/SECURITY_REVIEW.md` — secrets management, Docker/container, CI/CD, security headers,
+    HTTPS, dependency security, DoS, caching, background jobs, payments, webhooks — which belong to 9F; and
+    pagination/query-cost concerns (the unpaginated moderation queue, the comment `limit=100` single-fetch),
+    which are 9B's. A full line-by-line audit of the 107 LearnOrbit-added frontend files was also not done;
+    frontend coverage was deliberately limited to client-gating and UGC rendering.
+  - **Documentation**: this entry; docs/ARCHITECTURE.md gained a new decision entry (the reuse-`REJECTED`
+    rationale, the either-party and 404-not-403 choices, the re-approval consequence). docs/ROADMAP.md's
+    "Security review" box is now checked, with the two deferrals noted inline.
+    **Next per `docs/ROADMAP.md`: Phase 9B — Performance review.** Not started; do not begin automatically.
+    Two items are queued ahead of it if wanted first: the F2 rate-limiting increment, and the F3
+    CSRF-middleware decision for 9F.
+- **Phase 9B (Performance review): complete** — a review of the LearnOrbit-added surface from Phases 1–8 for
+  query cost, request fan-out, and payload size, followed by an approved three-part fix scope. Like 9A, the
+  increment was scoped during planning and the scope approved before implementation, since Phase 9's roadmap
+  line is a bare six-item list with no sub-definitions. The review itself was **static analysis only** — the
+  API dev server and Postgres were not running and were not started, so no `EXPLAIN`, no query-count
+  instrumentation, and no live profiling informed it. Every query-count figure below is read from the code
+  path, not measured. Two candidate optimizations were deliberately **not** implemented for exactly that
+  reason (see "Deferred pending measurement").
+  - **Scope reviewed**: the same 20 service modules / 3 routers / 13 `db/` models as 9A, plus the 6 LearnOrbit
+    Alembic migrations (cross-checked against the models — no index drift; every declared `index=True` /
+    `Index(...)` has a matching `op.create_index`) and the LearnOrbit frontend (hooks, services, Channel
+    components, Shorts/feed/moderation/family pages).
+  - **Reviewed with no issue found** (recorded so a later increment doesn't re-litigate them): comment and
+    notification listing both batch author/actor lookups through a single `IN` query — no N+1; quiz-attempt
+    grading and `_graded_answers` are joined single queries; the 6H/7C progress aggregations are one joined
+    query each over a per-user-bounded row set; the moderation queue renders `report.channelvideo_id` directly
+    with no per-report video fetch; `get_user_org` and `is_user_superadmin` memoize per `db_session`, so
+    repeated `is_org_admin` calls inside one request are free; React Query's defaults
+    (`staleTime: 60_000`, `refetchOnWindowFocus: false`, `retry: 1`) are sound; every engagement mutation uses
+    `setQueryData`/`setQueriesData` rather than an invalidate round-trip; the unique constraints on
+    likes/saves/reports bound per-user row growth (`ChannelVideoShare`'s append-only growth is a documented
+    Phase 4A decision, not an oversight); and `creation_date`-as-string orders lexicographically correctly.
+  - **9B-1 — pagination on four unbounded list endpoints.** `page`/`limit`, `default=50, ge=1, le=100`,
+    matching the existing `routers/orgs/orgs.py` convention. See docs/ARCHITECTURE.md § "V1 Hardening (Phase
+    9B)" for the decision record, including the load-bearing rule that the window is applied *after* the
+    filters and the visibility predicate, never instead of either.
+    - `GET /shorts` (`list_public_shorts`) — the worst case: cross-org, cross-tenant, public, and refetched by
+      the Shorts viewer to resolve prev/next. Grew with every Short published anywhere on the platform.
+    - `GET /feed` (`list_home_feed`) — returned the union of every followed channel's entire back catalogue.
+    - `GET /orgs/{id}/questions` (`list_questions`) — the question bank is designed to accumulate.
+    - `GET /orgs/{id}/reports` (`list_channel_video_reports`) — the moderation queue 9A finding F2 named as the
+      concrete casualty of the still-deferred reporting rate limit.
+  - **9B-2 — four frontend fetch fixes.**
+    - `useResolvedUser` was a bare `useEffect` + `useState` fetch sitting outside the query cache entirely —
+      one uncached request per row on the family page, duplicated for repeated ids, refetched on every remount.
+      Now a `useQuery` keyed on user id (new `queryKeys.publicUsers.byId`). Same signature and same
+      `user | null` return, so both call sites are unchanged.
+    - `ChannelVideoCommentsPanel` fetched 100 comments unconditionally on every watch page and both Shorts
+      rails, to render one integer on a closed trigger. Now a 20-row preview while closed, the full page once
+      opened, with `limit` in the query key so a preview can never be served as the complete list. **The
+      trigger renders `20+` when the preview is saturated** — capping the fetch without labelling the count
+      would have introduced a wrong-count UI regression, which the approved "reduce the limit" fix did not
+      anticipate. The three comment mutations now use `setQueriesData` prefix-matching so the preview and full
+      entries stay in step.
+    - `NotificationBell` lives in the global org nav and fetched 50 hydrated notification rows plus 50 actor
+      objects on **every** authenticated page load. Now gated on the dropdown being open; the badge keeps using
+      the separate, cheap unread-count endpoint. This one was found *after* the review was delivered, while
+      checking two backgrounded greps against the reported findings — the notification listing service itself
+      was, and remains, correct; the defect was entirely in when the client chose to call it.
+    - `ChannelVideoCard` / `ChannelShortCard` thumbnails gained `loading="lazy" decoding="async"`. They were
+      raw `<img>` with neither, so every card in a 4-column grid fetched eagerly including below the fold —
+      a deviation from the 27 other components in this repo that already lazy-load.
+  - **9B-3 — two query cleanups.** `mark_all_notifications_read` hydrated every unread row into Python to flip
+    one boolean; now a single bulk `UPDATE` returning `rowcount` (the `{"marked_read": n}` contract is
+    unchanged). `_question_counts` transferred one row per attached question to count them; now a
+    `GROUP BY quiz_id` aggregate — callers must keep reading the map with a default of 0, since a quiz with no
+    questions produces no GROUP BY row.
+  - **Tests (TDD, RED confirmed before implementation)**: 40 new tests. The RED run failed first with
+    `TypeError: list_home_feed() got an unexpected keyword argument 'page'` and the equivalent for
+    `list_public_shorts` / `list_questions` / `list_channel_video_reports` — all watched to fail before any
+    implementation existed. The behaviour-preservation guards (`*_default_call_still_works`, the notification
+    scoping/idempotence pair, the mixed question-count case) were green from the start **by design** — they
+    exist to prove the refactors changed nothing, not to drive them. Every paginated service additionally
+    carries an explicit authorization test: paging must not widen visibility (drafts/unlisted stay excluded),
+    must not bypass the 401/403 gate, and must not cross org boundaries.
+  - **Verification** (exact): scoped LearnOrbit backend regression across channel-videos, questions, reports,
+    notifications, quizzes, comments, resources, quiz-attempts, progress, child-progress, parent-links,
+    follows and their routers — **305 passed, 0 failed**. `uvx ruff@0.15.9` clean on all 15 changed Python
+    files. `bunx tsc --noEmit` clean. ESLint `--max-warnings=0` clean on all 12 changed frontend files.
+    Full `bun test tests`: **174 passed, 13 failed, 2 errors** — the same pre-existing baseline documented
+    since Phase 6/7/8B–8D/9A (`billing-internal-key`, `catalog-pagination`'s missing fixture, the `ar.json`
+    coverage timeout); no regressions. `git diff --check` clean.
+  - **Deferred pending measurement (NOT implemented — this is the point):**
+    - **The combined engagement endpoint.** The watch page issues four separate status requests
+      (like/save/share/comments) that each re-open with `get_channel_video`, i.e. the same org + video lookup
+      done four times; counted from the code, one authenticated watch-page load is ~8 HTTP requests and ~22 DB
+      queries, 8 of them redundant repeats. Collapsing them is a new API contract, and 9A's authorization
+      argument is currently anchored on each engagement service routing through `get_channel_video`
+      individually. Not worth changing on a count read off the source.
+    - **A composite/partial index for the Shorts predicate.** Only `content_format` is indexed; `published`,
+      `visibility` and `creation_date` are not. Whether that matters depends entirely on the eventual
+      long/short mix, which nobody knows yet — and 9B-1's pagination reduces the sort cost more reliably than
+      an index would. Add it only if `EXPLAIN ANALYZE` on seeded data shows the sort dominating.
+  - **Not fixed, with reason:** `GET /orgs/{id}/videos|resources|quizzes` remain unpaginated. Their section
+    components (`ChannelVideosSection`, `ChannelResourcesSection`, `ChannelQuizzesSection`) each issue a
+    second, deliberately unfiltered query whose only job is supplying distinct Subject/Topic/Level values for
+    the filter dropdowns. Paginating the endpoint without addressing that coupling would silently truncate the
+    dropdown options — a correctness bug traded for a performance win. Needs either a dedicated
+    filter-options endpoint or an accepted UX change; both are larger than 9B's approved scope.
+  - **Acceptable trade-offs, no action:** the section components' double-fetch while a filter is active
+    (documented, shares a cache entry when unfiltered); the watch/Shorts 3-deep request waterfall
+    (video → activity → course is genuinely sequential — each id comes from the previous response); full
+    `description` in list payloads; and the 60s unread-count poll per open tab.
+  - **Known limitation — no live browser or live API verification this session.** The dev server was not
+    running and was not started, so every change is covered by the automated suites, typecheck and lint only.
+    This matters more for 9B than it did for 9A: the four frontend changes alter *when* requests fire, and
+    that behaviour is exactly what a browser check would confirm. Unlike 9A, the affected pages (feed, watch,
+    Shorts, family, any page with the nav bell) are all single-org surfaces, so the standing single-tenancy
+    limitation does **not** block this — it is available as a follow-up, and is the single most valuable
+    outstanding check on this increment. Stated rather than skipped silently.
+  - **Documentation**: this entry; docs/ARCHITECTURE.md gained a decision entry recording the pagination
+    contract, the window-applied-last authorization rule, and the count-must-be-labelled-as-bounded frontend
+    convention. docs/ROADMAP.md's "Performance review" box is now checked, with the deferrals noted inline.
+    **Next per `docs/ROADMAP.md`: Phase 9C — Accessibility review.** Not started; do not begin automatically.
+- **Phase 9C (Accessibility review): complete** — an audit of the LearnOrbit-added frontend from Phases 1–8
+  against the project's stated **WCAG 2.1 AA** floor (`docs/DESIGN_SYSTEM.md` §22,
+  `docs/UI_UX_IMPLEMENTATION_PLAN.md` UI-13), followed by an approved three-part fix scope. Like 9A and 9B,
+  the increment was scoped during planning and the scope approved before implementation, since Phase 9's
+  roadmap line is a bare six-item list with no sub-definitions.
+  - **Review was static analysis only.** Neither dev server was running (`localhost:3000` and `localhost:1338`
+    both refused) and neither was started, so **no browser run, no screen-reader run, no axe scan** informed
+    this. Every contrast figure below is computed from the token values in `styles/globals.css`, not sampled
+    from a rendered page. Two fixes correct behaviour never confirmed defective at runtime — see "Not
+    verified" below.
+  - **Scope reviewed**: the 25 components and 37 pages/clients added on `learnorbit-v1`
+    (`git diff --diff-filter=A dev...learnorbit-v1 -- apps/web`), ~9,000 lines. Inherited LearnHouse surfaces
+    (editor, dash left menu, communities, playgrounds, store) were **not** audited — pre-existing and outside
+    the Phase 1–8 boundary.
+  - **Reviewed with no issue found** (recorded so a later increment doesn't re-litigate them): all five form
+    modals (`UploadChannelVideoModal`, `UploadChannelResourceModal`, `QuestionFormModal`, `QuizFormModal`,
+    `ReportChannelVideoDialog`) already wire `<Label htmlFor>` + `aria-invalid` + `aria-describedby` + a
+    form-level `role="alert"` + `aria-live="polite"` upload progress — this is the pattern the rest of the app
+    should copy, and M7's fix does; the four Channel section headers use correct `h2` + `aria-label`led filter
+    Selects + `aria-hidden` icons + full empty/error/retry states; the four card components use `h3`,
+    decorative `alt=""`, and keep the edit control a *sibling* of the anchor rather than a button nested in
+    one; the watch page has `h1` + `role="list"` metadata chips; engagement toggles use `aria-pressed`
+    correctly; Radix primitives are consumed unmodified so focus trap/restore and roving tabindex are
+    inherited; `Video.tsx` already resolves caption tracks, so §22's captions requirement is met at the player
+    level (creator-supplied captions are a content question, not a code fix); the bottom tab bar already meets
+    the 44px touch target; and `--muted-foreground` (4.76:1), `--destructive` (4.53:1) and `--primary`
+    (4.55:1) all clear the 4.5:1 text floor.
+  - **9C-1 — structure, names and labels (8 fixes).** `OrgMenuChrome.tsx` gained the `<main id="main-content">`
+    landmark and a skip link — every org page previously had two `nav`s and a `footer` but **no main**, and no
+    bypass mechanism, forcing ~12 tab stops before content (WCAG 2.4.1, Level A, the most severe class found).
+    The comment composer and both quiz answer fields were placeholder-only, which §22 forbids outright
+    (3.3.2/4.1.2); the sidebar labelled its `<aside>` instead of its `<nav>`; active nav state was colour +
+    icon-weight only with nothing in the accessibility tree (`aria-current`); unauthenticated like/share
+    counts used `aria-label` on a bare `<span>`, which is not exposed at all; the notification bell's
+    `aria-label` overrode its own unread badge; three search inputs were placeholder-only with unnamed clear
+    buttons; and the family-link error was a detached `<p>` with no `role="alert"` or field association.
+  - **9C-2 — contrast (3 fixes).** `--success` measured **3.31:1** and `--warning` **2.16:1** on
+    `--background`, both used as `text-xs` badge text across quiz results, progress, family activity and the
+    exam timer. Rather than change the base tokens — legitimately fine at the 3:1 non-text bar, and used by
+    icons/fills/borders throughout — 9C added `--success-strong` (5.02:1) and `--warning-strong` (5.05:1) for
+    text only. Also swapped `text-neutral-400`/`text-gray-400` body text (~2.6:1) and `text-red-500` (~3.3:1)
+    for tokens. See docs/ARCHITECTURE.md § "V1 Hardening (Phase 9C)" for the fill-vs-text rule.
+  - **9C-3 — keyboard and live regions (5 fixes).** The Shorts viewer's global ArrowUp/ArrowDown handler
+    excluded only INPUT/TEXTAREA/SELECT, so an open Radix dialog or menu — none of those tag names — had its
+    arrow keys stolen *and* the page navigated out from under it; it now bails on any open overlay. "Mark all
+    read" was a plain `<button>` inside a Radix `role="menu"`, which Radix's roving tabindex never reaches,
+    and is now a real `DropdownMenuItem`. The quiz options claimed `role="radiogroup"`/`role="radio"` without
+    implementing that pattern's keyboard contract and are now toggle buttons in a labelled group. The exam
+    timer switched to `aria-live="assertive"` on a region re-rendering **every second** — one screen-reader
+    interruption per second during a timed exam — and now announces at 5min/1min/30s/10s milestones from a
+    separate polite region. Advancing a question now moves focus to the prompt, previously never announced.
+  - **Deferred, recorded not fixed** (approved as out of 9C scope): **M11** — `prefers-reduced-motion` has
+    **zero** occurrences in `apps/web`, affecting 12 `animate-pulse`, 7 `animate-spin`, and the Shorts
+    snap-scroll transitions. This is *not* a WCAG 2.1 AA failure (2.3.3 is AAA) but *is* an explicit
+    §21/UI-13 requirement, and the Shorts viewer is the case that matters for vestibular-sensitive users.
+    Plus 7 Low findings: spinner-only submit buttons lose their accessible name while pending;
+    feed/comment/moderation lists are `div` stacks rather than `ul`/`li`; loading→loaded→error transitions
+    aren't announced; the verified badge is an SVG with `aria-label` + `<title>` but no `role="img"`; Shorts
+    rail buttons (40px) and the follow button (~24px) sit under the §7 44px target (WCAG 2.5.5 is AAA);
+    `ChannelHeader`/`AccountFamily` hardcode `text-gray-*` instead of tokens (latent only — **no dark-mode
+    toggle ships**, zero `next-themes`/`useTheme` matches, so `.dark` is unreachable); and two orphan
+    `<Label>` elements in `AccountFamily` used as section headings. The `<main>` landmark was added to the
+    `(withmenu)` tree only — the `dash` tree's chrome is inherited `ClientAdminLayout.tsx`, outside scope.
+  - **Verification**: `tsc --noEmit` **clean**. `eslint --max-warnings=0` **clean** on all 19 changed files
+    plus the new test. `bun test tests` → **198 pass / 13 fail / 2 errors**, against a **measured baseline of
+    174 pass / 13 fail / 2 errors** — the +24 are the new guard test, and the failure set is identical. That
+    baseline was established by `git stash push` of only the 9C paths and re-running, not by trusting the
+    documented record; the stash popped cleanly and `git stash list` is empty. The 13 failures remain the
+    pre-existing `billing-platform-key`, `billing-internal-key`, `catalog-pagination` (missing fixture module)
+    and the `ar.json` coverage timeout — none touch the changed files. `git diff --check` clean.
+  - **New test**: `apps/web/tests/a11y-guard.test.mjs` (24 assertions) in the existing `rtl-guard.test.mjs`
+    style. **No new lint rules and no new dependency** — enabling the fuller `jsx-a11y` set would light up the
+    inherited LearnHouse tree, and CI lints whole changed files, so PRs would block on debt they merely walked
+    past (the same reasoning `eslint.config.mjs` already records for the React Compiler rules). The guard
+    strips comments before asserting: it initially failed against the 9C comments that quote the removed
+    attributes verbatim.
+  - **Not verified — the most valuable outstanding check on this increment.** No browser, screen-reader or axe
+    run happened. Two 9C-3 fixes correct behaviour never confirmed defective at runtime: the Shorts arrow-key
+    hijack inside an open overlay, and "Mark all read" being keyboard-unreachable, were both reasoned from
+    Radix's documented focus model, not observed. Both fixes are safe and idiomatic regardless of whether the
+    original defect reproduced exactly as described, but the *findings* are unconfirmed. A keyboard pass over
+    the Shorts viewer with comments open, the notification dropdown, a full quiz attempt, and the timer's
+    final minute would settle all of it. Every affected page is a single-org surface, so the standing
+    single-tenancy limitation does **not** block this.
+  - **Documentation**: this entry; docs/ARCHITECTURE.md gained a decision entry for the fill-vs-text token
+    split and the guard-test-not-lint-rules convention; docs/DESIGN_SYSTEM.md §3 gained the correction — it
+    had asserted every token pairing met WCAG AA, which was **not true** for `--success`/`--warning` — plus
+    the new token table; docs/ROADMAP.md's "Accessibility review" box is now checked with the deferrals inline.
+    **Next per `docs/ROADMAP.md`: Phase 9D — Mobile-responsive polish.** Not started; do not begin
+    automatically.
+- **Phase 9D (Mobile-responsive polish): PARTIAL — M1–M4 of M1–M9 implemented, M5–M9 deferred.** A responsive
+  review of the LearnOrbit-added frontend (62 `.tsx` files, `c28889d2..HEAD`) across the Phase 1–8 surfaces
+  produced nine findings; the approved implementation batch was the four that break navigation or overflow the
+  viewport. `docs/ROADMAP.md`'s "Mobile-responsive polish" box is deliberately **still unchecked** — the
+  milestone is not complete while M5–M9 stand.
+  - **M1 (Critical) — mobile/tablet navigation could not reach the overflow destinations.** `OrgBottomTabBar`
+    renders Home + Shorts + `MAX_TABS = 2` config-driven items + "More", and the panel "More" opened carried
+    *only* search/notifications/account by design. With the default six-item menu that left **Podcasts,
+    Communities, Playgrounds and Store with no entry point at all below `lg`** — the panel had no
+    destinations in it. `MAX_TABS` is now exported from `OrgBottomTabBar` and `OrgMenu` derives
+    `overflowMenuItems` from the same `useOrgMenuItems(orgslug)` data and the same split, rendering them as a
+    labelled `<nav aria-label="More destinations">` styled like the desktop sidebar's items (44px rows,
+    `aria-current`, external items as `<a target="_blank">`, each closing the panel on click). No second
+    hardcoded menu list.
+    - **Correction to the finding as originally written.** The analysis claimed Library was among the
+      stranded items. Live measurement disproves that for the default org: the tab bar renders **Home,
+      Shorts, Courses, Library, More**, so Library occupies the second `MAX_TABS` slot and was always
+      reachable. It *would* fall into the overflow on any org whose config reorders or disables Courses, which
+      is why the fix is still the right one — but "Library was unreachable" was wrong and is not what the
+      change fixed.
+  - **M2 (Critical) — "More" did nothing between 768px and 1023px.** The button lives in the `lg:hidden` tab
+    bar; the panel it toggles was `md:hidden`, i.e. `display: none` across the whole tablet band. The panel is
+    now `lg:hidden`, and its duplicated search / notification bell / profile box — which the header itself
+    shows from `md` up — are individually re-gated `md:hidden` so they don't render twice at tablet widths.
+    The panel also gained `inert={!isMenuOpen}`: it is only translated off-screen (`-top-full opacity-0`), so
+    without it the six new links would have joined the existing three controls as off-screen tab stops.
+  - **M3 (High) — Shorts was not a full-viewport mobile experience.** The `100dvh` slide sat inside `<main>`'s
+    `pb-16` *below* the 60px fixed header, with `OrgFooter` and `Watermark` beneath it: the page scrolled, and
+    the fixed tab bar covered the bottom of the frame. `OrgMenuChrome` now adds `shorts` to `noFooterPaths`,
+    and a separate `isFullViewportPage` flag drops `pb-16 lg:pb-0` for **Shorts only** (copilot keeps its
+    padding). It publishes the real remaining height as a custom property on `<main>`:
+    `--org-content-viewport: calc(100dvh - {chromeHeight}px - env(safe-area-inset-bottom))`, where
+    `chromeHeight` = join banner (0 or `JOIN_BANNER_HEIGHT`) + `HEADER_HEIGHT` + `BOTTOM_TAB_BAR_HEIGHT` —
+    all three imported, none re-typed. `HEADER_HEIGHT` is newly exported from `OrgSidebar`,
+    `BOTTOM_TAB_BAR_HEIGHT` newly exported from `OrgBottomTabBar`. `short.tsx` and `shorts-index.tsx` then
+    swap every bare `100dvh` for `var(--org-content-viewport,100dvh)` — including inside
+    `h-[min(...,calc(100vw*16/9))]` — so the snap scroller, both IntersectionObserver spacers and the slide
+    stay exactly one *visible* viewport tall and the swipe math is unchanged.
+    - **Why a CSS variable and not an inline height:** an inline style beats `sm:`-prefixed classes, which
+      would have destroyed the viewer's centred fixed-aspect desktop layout (§16). The `,100dvh` fallback
+      keeps the route renderable outside the org chrome (e.g. `?chrome=none`).
+    - **A deliberate 7px of slack.** `BOTTOM_TAB_BAR_HEIGHT = 64` matches the `pb-16` the chrome already
+      assumes everywhere else; the bar measures **57px** rendered at these viewports. Content therefore ends
+      ~7px above the bar rather than flush with it. Keeping the number aligned with the existing `pb-16`
+      assumption was preferred over a second, divergent constant.
+  - **M4 (High) — engagement controls overflowed narrow viewports.** `ChannelVideoEngagementBar`'s inline
+    `bar` layout packed like / save / share / comments / report into `flex items-center gap-2` with no wrap
+    (≈294px of controls in a 328px column; four-digit counts pushed it past). Now `flex flex-wrap
+    items-center gap-2`. The `rail` layout (a column, also `role="group"`) is untouched.
+  - **Files changed (7):** `components/Objects/Menus/OrgMenu.tsx`, `OrgMenuChrome.tsx`, `OrgSidebar.tsx`,
+    `OrgBottomTabBar.tsx`; `components/Objects/Channel/ChannelVideoEngagementBar.tsx`;
+    `app/orgs/(withmenu)/[orgslug]/shorts/[channelvideoid]/short.tsx`; `.../shorts/shorts-index.tsx`.
+    **New test:** `apps/web/tests/responsive-guard.test.mjs` (9 tests / 18 assertions) in the established
+    `a11y-guard`/`rtl-guard` static-source style, including the same comment-stripping helper — the 9D
+    comments quote the replaced values verbatim, so the "must not appear" checks have to read code only.
+  - **Verification — exact results.**
+    - `bun test tests/responsive-guard.test.mjs` → **9 pass / 0 fail** (RED first: the same file ran
+      **0 pass / 9 fail** before any implementation edit).
+    - `bun test tests` → **207 pass / 13 fail / 2 errors**, against 9C's recorded **198 / 13 / 2**. The +9 are
+      the new guard tests; the failure set is byte-identical (`billing-platform-key`,
+      `billing-internal-key`, `catalog-pagination` missing fixture, and the `ar.json` coverage timeout).
+    - `tsc --noEmit` → **clean**.
+    - `eslint --max-warnings=0` on all 7 changed files → **0 errors, 1 warning**, and the warning is
+      pre-existing (`OrgMenu.tsx:120` `react-hooks/set-state-in-effect`, in the untouched focus-mode effect).
+    - `git diff --check` → **clean**.
+    - **Tailwind actually emits the new arbitrary utilities** — verified against the dev server's compiled
+      CSS, not assumed: `.h-\[var\(--org-content-viewport\,100dvh\)\]`,
+      `.min-h-\[var\(--org-content-viewport\,100dvh\)\]` and
+      `.h-\[min\(var\(--org-content-viewport\,100dvh\)\,calc\(100vw\*16\/9\)\)\]` are all present.
+  - **Live browser verification — done, and this is the first increment in Phase 9 to get it.** The Chrome
+    extension was unavailable and a Playwright browser download was declined, so the run instead drove the
+    already-installed headless Chrome over CDP from a throwaway Node script (no new dependency, nothing
+    installed, nothing committed), against the local dev stack (`bun run dev` + `uvicorn app:app`, the
+    existing `learnhouse-db-dev`/`learnhouse-redis-dev` containers). Measured at **360×640, 390×844,
+    768×1024 and 1024×768** over `/feed`, `/shorts`, `/shorts/<id>` and `/videos/<id>`:
+    - `document.documentElement.scrollWidth > clientWidth` was **false on every page at every viewport** —
+      no horizontal overflow anywhere.
+    - `--org-content-viewport` resolved to `calc(100dvh - 124px - 0px)` (60 + 64, join banner not shown).
+    - `<main>` `padding-bottom` was **0px on `/shorts` and `/shorts/<id>`** and **64px on `/feed` and
+      `/videos/<id>`** — the M3 opt-out is route-scoped, not global. No `<footer>` on either Shorts route.
+    - Shorts did **not** scroll: `scrollHeight === clientHeight` at 360×640, 390×844 and 768×1024.
+    - The More panel opened and rendered its `<nav>` at 360, 390 **and 768** (`display: block`) — M2
+      confirmed at the width that was previously dead — with all four overflow links 44px tall and fully
+      inside the viewport. At 1024 the panel is `display: none` and the tab bar `display: none`, i.e. the
+      desktop sidebar owns navigation.
+  - **Not live-verified (2), both blocked by dev-database content, not by the code.**
+    - **The Shorts slide/snap geometry.** All three `channelvideo` rows in the dev DB are
+      `content_format = 'long'`, so `/shorts` renders its empty state and `/shorts/<id>` its unavailable
+      state. Both use the new variable and both were measured, but the one-viewport-per-slide scroller, the
+      two IntersectionObserver spacers and swipe navigation were **not** exercised against a real short.
+    - **M4 at runtime.** `/videos/<id>` renders signed-out with no video body, so
+      `div[role="group"][aria-label="Video engagement"]` never mounted. The wrap fix is guard-tested and
+      code-reviewed only. Seeding one published short and one signed-in session would close both gaps.
+  - **Deferred — recorded, not fixed** (explicitly out of the approved batch):
+    - **M5 (Medium)** `QuizTimer.tsx:88` — `fixed top-20 end-4` overlays the answer options' right edge on a
+      full-width mobile column, and with `OrgJoinBanner` visible the header drops past 80px and hides the
+      timer outright. Fix: offset from the same `topOffset` the header/sidebar use; make it in-flow below
+      `sm`.
+    - **M6 (Medium)** `ChannelVideoCommentsPanel.tsx:317`, `ReportChannelVideoDialog.tsx:114` — raw
+      `DialogContent` (`w-full max-w-lg`, no inset) and `max-h-[85vh]` rather than `dvh`; composer and submit
+      go behind the on-screen keyboard below `sm`. Fix per-dialog (`w-[95vw]`, `max-h-[85dvh]`).
+    - **M7 (Medium)** `components/ui/dialog.tsx:101` — `DialogFooter` is `flex-col-reverse` with no gap, so
+      stacked buttons touch below `sm`. **Explicitly excluded by the approval**: shared inherited UI.
+    - **M8 (Low)** `OrgMenuChrome.tsx` — `pb-16` omits `env(safe-area-inset-bottom)`, which the tab bar
+      itself adds, so notched devices lose ~34px of content behind the home indicator. (The new
+      `--org-content-viewport` already subtracts the inset; `pb-16` still does not.)
+    - **M9 (Low / 9C carry-over)** — engagement `size="sm"` (32px) and the `ChannelHeader` follow button
+      (~24px) sit under §7's 44px target; tracked with 9C's deferred Lows.
+    - **No action** (reviewed, genuinely fine): the `dash` tree (`ClientAdminLayout` already stacks with
+      `lg:flex-row` + `pb-24`), every LearnOrbit grid (`grid-cols-1 sm:… lg:…`), feed, library, progress,
+      results and family surfaces, and the shared `Modal.tsx` (`w-[95vw] max-h-[90vh]`, scrolling body).
+      Rows consistently use `min-w-0`/`truncate`/`shrink-0`; there is no `<table>` in the added surface.
+  - **9C observation carried forward, deliberately not fixed here.** The mobile panel's children were already
+    focusable while the panel was closed (it is moved off-screen, not unmounted). M2's `inert` closes that for
+    the panel, but the underlying pattern — off-screen-but-focusable chrome — was not audited elsewhere; that
+    belongs to 9C's deferred list, not to 9D.
+  - **Documentation**: this entry. `docs/ARCHITECTURE.md` unchanged — `--org-content-viewport` is a local
+    layout detail of the org chrome, not a new API boundary, data model or reusable convention.
+    `docs/ROADMAP.md` unchanged: the 9D box stays open until M5–M9 are resolved or explicitly waived.
+    **Next recommended increment: 9D batch 2 — M5 + M6 + M8** (M7 needs an explicit call on editing shared
+    inherited UI; M9 rides with 9C's Lows). Not started; do not begin automatically.
+- **Phase 9D batch 2 (M5 + M6 + M8): complete. 9D is now M1–M6 + M8 done, M7 and M9 deferred.** The
+  `docs/ROADMAP.md` "Mobile-responsive polish" box remains **unchecked** — M7 and M9 are still open, so the
+  milestone is not finished.
+  - **M5 (Medium) — the exam timer could hide behind the chrome and could cover the answer column.**
+    `QuizTimer` was `fixed top-20 end-4`, i.e. an 80px guess at the chrome's height. The fixed header is
+    **60px**, and with `OrgJoinBanner` visible it starts **48px lower** — so on exactly the pages a
+    not-yet-joined student sees, the timer sat *behind* the header and was invisible. It now derives
+    `timerTop = (isJoinBannerVisible ? JOIN_BANNER_HEIGHT : 0) + HEADER_HEIGHT + 8` from the same
+    `useJoinBannerVisible()` / `JOIN_BANNER_HEIGHT` / `HEADER_HEIGHT` the sidebar and `OrgMenuChrome` already
+    position against — no new constants. Separately, being `fixed` at *every* width floated the pill over the
+    right edge of the answer options on the full-width mobile column; a positioning wrapper is now
+    `sticky … w-full … sm:fixed sm:end-4 sm:w-auto`, so below `sm` the timer takes its own row in flow and
+    can cover nothing, and from `sm` up — where the `max-w-2xl` column is narrower than the viewport — it
+    floats as before. `role="timer"`, `aria-live="off"`, the label and the 9C milestone announcements all
+    stayed on the pill; only positioning moved to the wrapper.
+  - **M6 (Medium) — the comments and report dialogs were unusable with the on-screen keyboard.** Both used
+    the raw primitive (`w-full max-w-lg`, no inset) so they ran edge to edge at 360px, and the comments panel
+    capped at `max-h-[85vh]` — `vh` ignores the on-screen keyboard, which put the composer and its Post
+    button underneath it. `ChannelVideoCommentsPanel` is now
+    `w-[95vw] sm:w-full max-h-[85dvh] flex flex-col p-6`; `ReportChannelVideoDialog` is
+    `w-[95vw] sm:w-full max-h-[85dvh] overflow-y-auto p-6` — it needs its own scroll container because,
+    unlike the comments panel, it has no inner scrolling region. Both sized **per dialog**;
+    `components/ui/dialog.tsx` is untouched, and a guard test now pins that.
+  - **M8 (Low) — the mobile bottom padding did not clear the home indicator.** The tab bar adds
+    `env(safe-area-inset-bottom)` to its own padding but `<main>` cleared only the bar's `4rem`, so on a
+    notched device the last row of content sat under the indicator. `pb-16` →
+    `pb-[calc(4rem_+_env(safe-area-inset-bottom))]`, with `lg:pb-0` unchanged so the desktop layout gains no
+    stray spacing. (Tailwind's `_` → space conversion is required here: `calc(4rem+env(…))` without spaces
+    around the `+` is invalid CSS.)
+  - **Files changed (5):** `components/Objects/Channel/QuizTimer.tsx`,
+    `components/Objects/Channel/ChannelVideoCommentsPanel.tsx`,
+    `components/Objects/Channel/ReportChannelVideoDialog.tsx`, `components/Objects/Menus/OrgMenuChrome.tsx`,
+    `components/Objects/Menus/OrgBottomTabBar.tsx` (comment only — it named the now-replaced `pb-16`).
+    `apps/web/tests/responsive-guard.test.mjs` extended from 9 tests to **15**.
+  - **Verification — exact results.**
+    - `bun test tests/responsive-guard.test.mjs` → RED first at **10 pass / 5 fail** (the 5 new M5/M6/M8
+      assertions), then **15 pass / 0 fail** after implementation.
+    - `bun test tests` → **213 pass / 13 fail / 2 errors**, against batch 1's **207 / 13 / 2**. The +6 are the
+      new guard tests; the failure set is unchanged (`billing-platform-key`, `billing-internal-key`,
+      `catalog-pagination` missing fixture, `ar.json` coverage timeout).
+    - `tsc --noEmit` → **clean**. `eslint --max-warnings=0` on all 5 changed files → **clean, 0 problems**
+      (batch 1's single pre-existing `OrgMenu.tsx:120` warning is not in this batch's file set).
+      `git diff --check` → **clean**.
+    - **Tailwind emits the new utilities** — confirmed in the dev server's compiled CSS, not assumed:
+      `padding-bottom: calc(4rem + env(safe-area-inset-bottom))` and `max-height: 85dvh` are both present.
+  - **Live browser verification** — same method as batch 1 (already-installed headless Chrome driven over CDP
+    from a throwaway Node script; no new dependency, nothing installed or committed), against the local dev
+    stack, at **360×640, 390×844, 768×1024** plus **1024×768** as the desktop control:
+    - **No horizontal overflow at any of the four viewports** (`scrollWidth > clientWidth` false throughout).
+    - **M8 confirmed:** `<main>` computed `padding-bottom` is **64px below lg and 0px at 1024×768**. Headless
+      desktop Chrome resolves `env(safe-area-inset-bottom)` to `0`, so the calc yields exactly the previous
+      64px on non-notched viewports — the change is additive only where an inset actually exists, and
+      `lg:pb-0` still drops all of it on desktop.
+    - **M6 and M5 verified at the utility-contract level.** The real dialogs need an authenticated video page
+      and the real timer needs a live timed attempt, neither of which this dev DB can serve (see limitations),
+      so the run mounted a node carrying each component's exact class string and read the resolved cascade:
+      the dialog measured **342px wide × 544px max-height at 360×640** and **370.5 × 717.4 at 390×844**
+      (= 95vw / 85dvh in both cases), and switched to `sm:w-full` (full parent width) at 768 and 1024 — the
+      inset applies below `sm` only. The timer wrapper resolved to `position: sticky, width: 100%` at 360 and
+      390 and `position: fixed, width: auto` at 768 and 1024, which is precisely the M5 breakpoint contract.
+  - **Limitations — what was *not* observed at runtime.**
+    - **The timer against real answer controls.** Reaching it needs an authenticated student, a
+      `quiz_type = 'exam_practice'` quiz with `time_limit_minutes`, and an in-progress attempt. That
+      `position: sticky` in normal flow cannot overlap a following sibling is structural, and the computed
+      position was confirmed — but the pinned-while-scrolling behaviour over a real question list, and the
+      join-banner-visible offset, were **not** seen. (Sticky also fails silently inside an
+      `overflow: hidden` ancestor; `<main>` is `flex-1 relative` and the root is `flex flex-col
+      min-h-screen`, so it is clear by inspection, not by observation.)
+    - **The dialogs with an actual on-screen keyboard.** `/videos/<id>` renders signed-out with no video
+      body, so neither dialog mounts; and a software keyboard cannot be raised in headless Chrome at all. The
+      `dvh` choice is the correct unit for it, but the keyboard-open case is reasoned, not measured.
+    - **The safe-area inset itself is always `0` here.** Only a notched device (or a UA that reports a
+      non-zero inset) exercises the part of M8 that actually changed.
+    - Seeding a published short, a timed exam attempt and a signed-in session would close every gap listed
+      here and the two carried over from batch 1.
+  - **Still deferred after this batch:**
+    - **M7 (Medium)** `components/ui/dialog.tsx:101` — `DialogFooter` is `flex-col-reverse` with no gap, so
+      stacked buttons touch below `sm`. Fix is `gap-2 sm:gap-0`, but the file is inherited shared UI used
+      across the whole LearnHouse tree; **excluded by the approval for both 9D batches** and still needs an
+      explicit call.
+    - **M9 (Low / 9C carry-over)** — engagement `size="sm"` (32px) and the `ChannelHeader` follow button
+      (~24px) sit under §7's 44px target; tracked with 9C's deferred Lows, not with 9D.
+  - **Documentation**: this entry. `docs/ARCHITECTURE.md` unchanged — nothing here introduces an API
+    boundary, data model, security pattern or reusable convention. `docs/ROADMAP.md` unchanged: the 9D box
+    stays open while M7 and M9 stand. **Next recommended increment: a scope call on M7** (one-line change to
+    inherited shared UI) — or, if 9D is to be closed as-is with M7/M9 waived, check the ROADMAP box and move
+    to **9E — Testing**. Not started; do not begin automatically.
+- **Phase 9D batch 3 (M7): complete. Phase 9D — Mobile-responsive polish is now DONE** (M1–M8 implemented,
+  **M9 intentionally deferred** under the existing 9C Low-findings decision). `docs/ROADMAP.md`'s
+  "Mobile-responsive polish" box is checked, with the M9 deferral noted inline.
+  - **M7 (Medium) — stacked dialog buttons touched below `sm`.** `DialogFooter` in the inherited shared
+    `components/ui/dialog.tsx` was `flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-3`: the only
+    spacing rule is `sm:`-prefixed *and* horizontal, so in the mobile column the two buttons had **no
+    separation at all**. Measured at **0px** between Cancel and Submit at both 360×640 and 390×844 before the
+    fix. Now `flex flex-col-reverse gap-y-2 sm:flex-row sm:justify-end sm:space-x-3 sm:gap-y-0`.
+  - **Deviation from the approved class pair, and why — this is the finding of the increment.** The approval
+    specified `gap-2` / `sm:gap-0`. Inspecting all **20** `DialogFooter` usages across 10 files first showed
+    that pair would have broken two of the same approval's own constraints ("preserve the existing desktop
+    behavior", "do not modify unrelated dialog components"):
+    - **5 usages already pass their own unprefixed `gap-2`** — `app/home/home.tsx:461` and `:516`,
+      `app/(hub)/account/page.tsx:261`, `AccountDangerZone.tsx:149` (all `className="mt-5 gap-2"`), and
+      `Modal.tsx:95` (`flex flex-row justify-end gap-2`).
+    - twMerge resolves a caller's unprefixed `gap-2` against a base `gap-2` (caller wins) but **keeps a base
+      `sm:gap-0`**, because a different breakpoint modifier is a different key. Those five would therefore
+      have kept their mobile gap and *lost* their desktop one.
+    - Measured, not assumed: with `gap-2 sm:gap-0` those five dropped from **20px to 12px** between buttons at
+      1024×768 (they currently get `gap-2`'s 8px *plus* `space-x-3`'s 12px). The remaining 15 usages were
+      unaffected either way.
+    - `gap-y-2` / `sm:gap-y-0` produces an **identical** mobile fix (0 → 8px) and is inert in a single-row
+      flex, so every desktop measurement stayed byte-identical to the pre-fix baseline. It is the same
+      one-line change, scoped to the axis that actually had the bug. **Reversing this to the literal
+      `gap-2 sm:gap-0` is a one-line edit if the 8px desktop change is wanted after all.**
+  - **Files changed (1):** `components/ui/dialog.tsx` — the `DialogFooter` class string plus the comment
+    recording the twMerge interaction above. **No other dialog component was touched**, and a guard test now
+    asserts that the five gap-supplying callers are unedited.
+  - `apps/web/tests/responsive-guard.test.mjs` extended from 15 tests to **18**: the stack has a gap; the gap
+    is axis-scoped and `sm:gap-0` specifically must *not* appear (with the measured reason inline);
+    `sm:space-x-3` survives; and the five callers still carry their own `gap-2`.
+  - **Verification — exact results.**
+    - `bun test tests/responsive-guard.test.mjs` → RED at **16 pass / 2 fail**, then **18 pass / 0 fail**.
+    - `bun test tests` → **216 pass / 13 fail / 2 errors** against batch 2's **213 / 13 / 2**. The +3 are the
+      new M7 tests; the failure set is unchanged (`billing-platform-key`, `billing-internal-key`,
+      `catalog-pagination` missing fixture, `ar.json` coverage timeout).
+    - `eslint --max-warnings=0 components/ui/dialog.tsx` → **clean**. `tsc --noEmit` → **clean**.
+      `git diff --check` → **clean**.
+  - **Live verification — a genuine before/after regression test, the strongest in Phase 9.** Same method as
+    batches 1–2 (already-installed headless Chrome over CDP; no new dependency, nothing installed or
+    committed). The pre-fix spacing of all four *usage shapes* was measured and recorded **before** the
+    primitive was edited; the exact `cn()`/twMerge output the component now ships was then computed with the
+    repo's own `tailwind-merge` (so the probe measured what actually renders, not a hand-written guess) and
+    re-measured at 360×640, 390×844 and 1024×768:
+    - `bare` (14 usages) and `feedback` — **0px → 8px** on both mobile viewports. **Fixed.**
+    - `callerGap2` (4 usages) and `modalRow` — **8px, unchanged** on mobile.
+    - **All four shapes unchanged at 1024×768**: 12px, 20px, 20px, 12px — identical to the pre-fix baseline.
+    - Harness verdict: **"no regression in any usage shape"** across all 12 shape × viewport combinations.
+  - **Limitations.** Only the *shapes* of usage were rendered, not each of the 20 call sites individually —
+    but the four shapes are exhaustive over the distinct class strings twMerge produces, which was verified
+    by running the repo's own `cn()` over every usage's `className`. The dialogs themselves were still not
+    driven with a real on-screen keyboard (that limitation belongs to M6 and stands unchanged). No new
+    device conditions were manufactured for this increment.
+  - **Carried-forward limitations from batches 1–2, all still open** (none of them is blocked by code — each
+    needs dev-database content or real hardware): the Shorts **snap/slide geometry** is unexercised (every
+    `channelvideo` row is `content_format = 'long'`); the **engagement-bar wrap** is guard-tested only
+    (`/videos/<id>` renders signed-out with no video body); the **quiz timer over real answer controls** is
+    unexercised (needs an authenticated in-progress timed `exam_practice` attempt); the **dialogs with an
+    on-screen keyboard** cannot be reproduced in headless Chrome; and **`env(safe-area-inset-bottom)` is
+    always `0`** here, so the part of M8 that actually changed only takes effect on a notched device.
+    Seeding a published short, a timed exam attempt and a signed-in session closes the first four.
+  - **M9 remains intentionally deferred** — engagement `size="sm"` (32px) and the `ChannelHeader` follow
+    button (~24px) sit under §7's 44px target. WCAG 2.5.5 is AAA, not the AA bar 9C worked to, and 9C already
+    recorded this among its seven deferred Low findings; it is tracked there, not as 9D work. This is the
+    standing decision under which 9D is being closed.
+  - **Documentation**: this entry; `docs/ROADMAP.md`'s "Mobile-responsive polish" box checked with the M9
+    deferral inline. `docs/ARCHITECTURE.md` unchanged — a one-line utility change to an inherited primitive
+    is not an architectural decision, API boundary or new convention.
+    **Next per `docs/ROADMAP.md`: Phase 9E — Testing.** Not started; do not begin automatically.
+- **Phase 9D M5 + M6 — code-review verification pass (no implementation change).** M5 and M6 were already
+  implemented in batch 2; this pass re-read the shipped code without a browser, at the request to verify by
+  code review rather than CDP. It produced **one correction to the batch-2 record** and no code changes.
+  - **Confirmed correct by inspection.**
+    - **M5** — `timerTop = (isJoinBannerVisible ? JOIN_BANNER_HEIGHT : 0) + HEADER_HEIGHT + 8` puts the pill
+      8px below the fixed header's bottom edge in both banner states, using the same two values the sidebar
+      and `OrgMenuChrome` position against. The positioning wrapper is `sticky … w-full … sm:fixed sm:end-4
+      sm:w-auto`, with `top` supplied inline so it applies in both modes. `position: sticky` is not clipped
+      here: the wrapper's parent is `<main>` (`flex-1 relative`, no `overflow`) inside a root that is
+      `flex flex-col min-h-screen`, and the timer is rendered as a fragment sibling *before*
+      `QuestionRunner`, so it pins for the whole question list. Being in normal flow below `sm`, it cannot
+      overlap the answer options — it takes its own row instead. `role="timer"`, `aria-live="off"`, the
+      accessible name and the 9C milestone announcements all remained on the pill, not the wrapper. `end-4`
+      and `justify-end` are both logical, so RTL is unaffected.
+    - **M6** — twMerge resolves `w-[95vw]` over the primitive's `w-full` and `sm:w-full` restores it from
+      `sm` up, while `max-w-lg` survives and still caps wide screens; at 360px the 95vw inset binds and the
+      cap does not. The comments panel keeps `flex flex-col` + an inner `flex-1 overflow-y-auto` region, so
+      the list scrolls and the composer stays pinned; the report dialog has no inner region, hence
+      `overflow-y-auto` on the content itself.
+  - **Correction — the batch-2 claim about `vh` → `dvh` and the on-screen keyboard was overstated.** This app
+    sets no viewport meta of its own (no `export const viewport` anywhere under `app/`), so Next.js emits the
+    default `width=device-width, initial-scale=1` with no `interactive-widget` value. Chrome's default is
+    `interactive-widget=resizes-visual`, under which the on-screen keyboard resizes only the **visual**
+    viewport — the layout viewport and therefore `dvh` are unchanged; iOS Safari behaves the same way. So
+    `max-h-[85dvh]` does **not**, on its own, shrink the dialog when the keyboard opens.
+    - What `dvh` genuinely fixes over `vh` is **dynamic browser chrome** (the collapsing URL bar), which
+      `vh` ignores — a real improvement, and the `w-[95vw]` inset is correct regardless. M6 is still a net
+      win; it is just not the complete keyboard fix batch 2 described.
+    - **Closing the keyboard case properly** needs either `interactive-widget=resizes-content` on the root
+      viewport export, or a `visualViewport` listener. Both are global/new-infrastructure changes well
+      outside "per-dialog responsive sizing", so neither was made here. **Recommended follow-up, not done.**
+  - **Verification (code-level only — no browser was used for this pass).**
+    `bun test tests/responsive-guard.test.mjs` → **18 pass / 0 fail**. `bun test tests` → **216 pass /
+    13 fail / 2 errors**, identical to the established baseline; the 13 failures remain the pre-existing
+    `billing-platform-key`, `billing-internal-key`, `catalog-pagination` (missing fixture) and the `ar.json`
+    coverage timeout. `eslint --max-warnings=0` on the three M5/M6 files → **clean**. `tsc --noEmit` →
+    **clean**. `git diff --check` → **clean**.
+  - **Limitations unchanged.** Nothing was manufactured for this pass: the timer was still not driven over a
+    real in-progress timed attempt, and the dialogs were still not opened with a real on-screen keyboard.
+    The other carried-forward gaps (Shorts snap geometry, engagement-bar wrap, zero safe-area inset) stand
+    as recorded. **M9 remains intentionally deferred** under 9C's Low-findings decision. Phase 9D's status is
+    unchanged by this pass — still complete, with the `docs/ROADMAP.md` box checked.
+- **Phase 9D M5 + M6 — independent code-review verification pass (no browser).** Requested explicitly as
+  code review rather than the headless-Chrome/CDP method used in the batch-2 record above. No implementation
+  changed; this pass re-read the shipped code and checked the things a browser run cannot settle. It produced
+  **one correction to the batch-2 record** (M6, below).
+  - **Checks re-run (code-level only):** `bun test tests/responsive-guard.test.mjs` → **18 pass / 0 fail**;
+    `bun test tests` → **216 pass / 13 fail / 2 errors**, unchanged from the established baseline and with an
+    identical failure set; `eslint --max-warnings=0` on `QuizTimer.tsx`, `ChannelVideoCommentsPanel.tsx`,
+    `ReportChannelVideoDialog.tsx` → **clean**; `tsc --noEmit` → **clean**; `git diff --check` → **clean**.
+  - **M5 — confirmed sound, including its one real failure mode.** `position: sticky` is silently inert
+    inside any ancestor that sets `overflow`, which would have made the mobile fix a no-op with no error
+    anywhere. `styles/globals.css` was scanned programmatically for every rule whose selector names `html` or
+    `body` and sets `overflow`: **none exist**. `<body>` carries no className, and `<main>` is
+    `flex-1 relative`. The sticky wrapper is therefore in a clean containing block.
+    - **Offset arithmetic re-derived:** the header is fixed at `top: topOffset` (`JOIN_BANNER_HEIGHT` or `0`)
+      with `h-[60px]`, so its bottom edge is `banner + 60`. `timerTop = banner + HEADER_HEIGHT + 8` clears it
+      by exactly 8px in **both** banner states, and matches `OrgSidebar`'s own
+      `topOffset = banner + HEADER_HEIGHT`. The old `top-20` (80px) cleared the no-banner case by 20px and
+      the banner case by **−28px** — i.e. sat behind the header, which is the reported defect.
+    - **Semantics preserved:** `role="timer"`, `aria-live="off"`, the `aria-label`, and the 9C milestone
+      `role="status"` region with `ANNOUNCE_AT_SECONDS` are all still on the inner pill and untouched; only
+      positioning moved to the new wrapper. RTL-safe — `sm:end-4` is a logical property and `justify-end`
+      flips with direction.
+  - **M6 — correction to the batch-2 record.** That entry stated `dvh` "is the correct unit" for the
+    on-screen keyboard. More precisely: **`dvh` tracks the *dynamic viewport*** — browser chrome expanding
+    and collapsing — and the on-screen keyboard only shrinks that viewport when the page opts in with
+    `interactive-widget=resizes-content`. This app has **no `export const viewport` anywhere** and no
+    `viewport` meta in `app/layout.tsx`, so Next.js emits its default
+    (`width=device-width, initial-scale=1`) with no `interactive-widget` directive. On browsers that overlay
+    the keyboard rather than resize, `85dvh` therefore does **not** shrink when it opens.
+    - **What M6 does reliably fix, unchanged:** the dialog can no longer overshoot the viewport
+      (`85vh` → `85dvh` removes the URL-bar error), and `w-[95vw] sm:w-full` supplies the 360px inset the raw
+      primitive lacked. The keyboard-overlap case is **improved but not guaranteed**.
+    - Closing it fully needs a root `viewport` export with `interactiveWidget: 'resizes-content'` — a global
+      change affecting every page, i.e. new responsive infrastructure and out of 9D's scope. **Recorded, not
+      fixed**; a reasonable candidate for 9E or a follow-up increment.
+    - **twMerge interaction verified:** `w-[95vw]` overrides the primitive's `w-full`, `sm:w-full` re-applies
+      it from `sm`, and `max-w-lg` survives — so wide screens are unchanged. The comments panel keeps
+      `flex flex-col` plus its inner `flex-1 overflow-y-auto` region, so the list scrolls while the composer
+      stays pinned; the report dialog has no inner scroll region, which is why `overflow-y-auto` sits on the
+      dialog content itself.
+  - **Limitations unchanged.** This pass deliberately manufactured no device or keyboard conditions and ran
+    no browser. Everything above is source-level reasoning plus the code-level checks listed; it complements
+    the batch-2 live measurements rather than superseding them. The carried-forward runtime gaps (Shorts snap
+    geometry, engagement-bar wrap, the timer over real answer controls, the dialogs with a real keyboard, and
+    `env(safe-area-inset-bottom)` always being `0` off-device) all still stand.
+- **Phase 9E (Testing): complete** — an audit of what the LearnOrbit-added surface from Phases 1–8 was
+  actually protected against, followed by four narrowly-scoped test increments. No implementation code was
+  written or changed. Like 9A–9D, the increment was scoped during planning and the scope stated before
+  implementation, since Phase 9's roadmap line is a bare six-item list with no sub-definitions and no PRD
+  elaboration.
+  - **What "Testing" was taken to mean, and what it was not.** The audit's first finding is that LearnOrbit
+    already has substantial, per-phase-TDD coverage: **7,352 lines of backend test across the 16 LearnOrbit
+    service modules and 5 router test files**, plus 23 frontend `bun test` files. Every one of the 16 service
+    modules already has a dedicated test file, and **10 of the 16 already carried an explicit
+    cross-organization isolation case** (`channel_videos`, `channel_resources`, `quizzes`, `questions`,
+    `channel_video_reports`, `progress`, and the four engagement modules). `quiz_attempts` and `follows` had
+    **none** — the gap 9E-1 and 9E-2 close. Of the remaining four, `notifications`, `parent_links` and
+    `child_progress` are cross-org *by design* (org scoping is not their boundary — recipient identity and
+    link approval are), and `verification` is superadmin-gated platform-wide. So 9E was deliberately **not**
+    run as "add tests everywhere" or as a coverage-percentage exercise —
+    it was run as a gap hunt against the specific properties that break silently. Nothing was added to raise
+    a count, no existing test was rewritten, no legacy test was touched, and no new test framework was
+    introduced (`pytest` + `bun test` were sufficient; the two new frontend-shaped invariants fit the
+    existing `a11y-guard`/`responsive-guard` source-assertion pattern).
+  - **Method: mutation-checked, not just green.** Every security assertion added below was verified by
+    removing the guard it covers from a scratch copy of the service, watching the new test fail, and
+    restoring — the RED step that a regression test (as opposed to TDD of new code) otherwise never gets.
+    All services were restored byte-identically; `git diff` on `quiz_attempts.py`, `follows.py`,
+    `channel_video_comments.py`, `channel_video_likes.py` and `lib/query/keys.ts` is empty for this
+    increment. The mutation results are recorded per finding, including **one case where the mutation showed
+    the new test was redundant with existing coverage** — recorded rather than quietly dropped (see 9E-3).
+  - **Baseline established before any change** (both suites run to completion first):
+    - Backend `TESTING=true uv run pytest src/tests/ -q --no-cov -p no:randomly`:
+      **5,688 passed, 10 failed, 29 skipped** in 20m23s.
+    - The 10 failures are all pre-existing and all in **inherited LearnHouse** modules, none in
+      LearnOrbit-added code: `test_core_events.py::test_register_ee_helpers_and_startup`,
+      `test_core_events_runtime.py::test_ee_hook_registration_and_paid_access`,
+      `test_custom_domains_service.py` (×3), `test_org_invites_service.py` (×3),
+      `test_podcasts_service.py` (×2).
+    - Frontend `bun test tests`: **216 passed, 13 failed, 2 errors** — the same baseline documented since
+      Phase 6/7/8B–8D/9A (`billing-platform-key` ×3, `billing-internal-key` ×7, the `ar.json` coverage
+      timeout; errors from `catalog-pagination`'s missing fixture module).
+  - **Gap analysis — what was found, and what was found to be already fine.** Read in full: `quiz_attempts`,
+    `channel_video_reports`, `notifications`, `child_progress`, `progress`, `verification`, `follows`,
+    `quizzes`, `questions`, `channel_videos`, `channel_resources`, `parent_links`, plus their test files.
+    - **Already adequately covered — no action taken** (stated so the next session does not re-audit them):
+      report submission/queue/resolve authorization (32 tests incl. cross-org and pagination-preserves-admin);
+      notification recipient isolation (15 service + 8 router tests incl. the bulk-UPDATE scoping);
+      parent-child authorization (19 service + 6 router classes, incl. 9A's revocation cut-off);
+      superadmin-only channel verification (7 tests, incl. "the channel's own admin cannot self-verify" and
+      the check-order test); own-progress aggregation (8 tests incl. cross-org and cross-user); home-feed and
+      global-Shorts visibility predicates; question-bank and quiz admin gating (28 + 30 tests). Frontend
+      logic modules (filters ×4, uploads ×2, quiz timer, quiz results, parent-link validation, video source)
+      are all tested, and 9C/9D's invariants are pinned by `a11y-guard`/`responsive-guard`.
+    - **G1 (security, high) — `quiz_attempts` was the only LearnOrbit module with no cross-org test at all.**
+      `_get_quiz_or_404` (org-scoped) and `_get_attempt_or_404` (quiz-scoped) both carry `SECURITY:` comments
+      in the service source, and **neither predicate was exercised by any test**. This is the module where a
+      missed predicate leaks an answer key rather than a title.
+    - **G2 (security, medium) — no anonymous case on `get_quiz_attempt`/`submit_quiz_attempt`.**
+      `start_quiz_attempt` and `list_quiz_attempts` each had one; the other two entry points did not.
+    - **G3 (security, high) — the answer-key strip was asserted on only one of its two call sites.**
+      `_strip_question` runs in `start_quiz_attempt` **and** in `get_quiz_attempt` (the "reload/resume the
+      exam page" path). Only the start path was asserted; the resume-path test asserted merely that
+      `questions is not None`.
+    - **G4 (isolation, medium) — `follows` had no per-channel test.** Every one of its 10 existing tests used
+      the single `org` fixture, so a service that ignored `org_id` entirely would have passed the whole file.
+      Following is the input to the Phase 4G home feed, so a leaked follow edge is a content-visibility bug,
+      not just a wrong follower count.
+    - **G5 (cross-feature, medium) — the moderation → discovery seam was untested.** Phase 8D's admin quick
+      action is `published → False`, and its *point* is that the video then leaves every surface a viewer
+      could reach it through — surfaces owned by 2C, 3C, 4G and 4B–4C, each re-deriving visibility from its
+      own predicate. Every existing per-surface test builds a video that was **never** published; the whole
+      suite contained exactly one `published=False` call, inside an authorization test. The
+      published → engaged-with → unpublished sequence that moderation actually produces was exercised nowhere.
+    - **G6 (client-side isolation, medium) — the per-viewer query keys had no guard.** `lib/query/keys.ts`
+      keys `feed.home`, `notifications.*` and `parentLinks.*` by user id. Dropping that argument still
+      type-checks (the parameter is `number | undefined`), still lints, and still renders — but turns the
+      React Query cache into a cross-user read for two accounts used in one browser. The backend stays
+      correct and nothing fails. The prefix-based invalidation contract that keys.ts documents in prose was
+      likewise asserted nowhere.
+  - **9E-1 — exam-integrity regression tests (G1 + G2 + G3).** +9 tests appended to
+    `src/tests/services/test_quiz_attempts_service.py` (17 → 26). Four cross-org (start/get/submit/list, each
+    also asserting no side effect — no attempt row created, status still `in_progress`), two cross-quiz
+    (get/submit, with the positive control that correct addressing still resolves), two anonymous
+    (get/submit), and one resume-path answer-key containment test.
+    - **Mutation results.** Dropping `Quiz.org_id == org_id` from `_get_quiz_or_404` → the 4 cross-org tests
+      fail, 22 pass. Dropping `QuizAttempt.quiz_id == quiz_id` from `_get_attempt_or_404` → the 2 cross-quiz
+      tests fail (submit surfacing `422 answers reference a question not attached to this quiz`, i.e. exactly
+      the grading corruption its docstring predicts). Making `get_quiz_attempt` build `QuestionForAttempt`
+      directly instead of via `_strip_question` → **only** the new resume test fails, 25 pass.
+    - **That last mutation is the concrete finding of 9E-1**: before this increment, a regression that
+      stripped the answer key on start but not on resume would have passed the entire 5,688-test suite while
+      serving `is_correct`, `accepted_answers` and `explanation` to any student who refreshed the exam page.
+      The new test also asserts on the serialized payload (`model_dump_json()`), so a future field added to
+      `QuestionForAttempt` without stripping is caught too.
+  - **9E-2 — per-channel follow isolation (G4).** +3 tests appended to
+    `src/tests/services/test_organization_follows_service.py` (10 → 13): following one channel does not
+    follow another; `_follower_count` reports 2 and 1 across two channels, never 3; unfollowing one channel
+    leaves the other intact.
+    - **Mutation results.** Neutralising `_follower_count`'s `org_id` predicate → 2 new tests fail, **all 10
+      pre-existing tests still pass**. Neutralising `get_follow_status`'s `org_id` predicate → 2 new tests
+      fail, **all 10 pre-existing tests still pass**. The gap was real in both directions.
+  - **9E-3 — cross-feature moderation → discovery integration (G5).** New file,
+    `src/tests/services/test_moderation_visibility_integration.py`, 6 tests. Each asserts the pre-moderation
+    baseline first so the post-moderation assertions cannot pass vacuously: a moderated long video leaves the
+    channel listing, the home feed and direct fetch (403); a moderated short leaves the global
+    `list_public_shorts` queue; moderation does not take down the video's neighbours; a viewer who already
+    liked and commented loses read *and* write access to both; the reporter cannot re-file after the report
+    is resolved and the video pulled; and the channel admin still resolves the video and can restore it.
+    - **Honest scoping of its value, measured not assumed.** Removing the `get_channel_video` delegation from
+      `list_channel_video_comments`/`get_like_status` fails the new engagement test — **but it also fails 2
+      tests in the existing likes/comments suites**, so that assertion is a composed re-check, not the only
+      guard. The three assertions with no other coverage anywhere are the ones about the *shape* of a
+      moderation action rather than any single predicate: non-collateral-damage, the resolved-report
+      re-file path, and reversibility. **Nothing else in the suite performs a publish → unpublish → publish
+      round trip.** This overlap analysis is recorded in the file's own docstring so it is not re-derived.
+    - **Deliberately excluded, with reason, in the file's docstring**: report authorization (already fully
+      covered — not duplicated), and FK `ondelete="CASCADE"` row cascade, which Postgres enforces but this
+      SQLite-backed suite runs with `PRAGMA foreign_keys` off — a test there would assert the harness's
+      behaviour, not production's. Left to a real-database integration pass.
+  - **9E-4 — query-key cache-isolation guard (G6).** New file, `apps/web/tests/query-key-isolation.test.mjs`,
+    48 tests. Per-viewer keys must differ per user, embed the id, stay stable for one user, never collide
+    across resources, and never coincide with another viewer's key; org-scoped list keys must differ per org
+    and not collide; filtered list keys must extend the unfiltered key **as a prefix** (the documented
+    `invalidateQueries` contract, load-bearing for every filtered listing since 2G-3 and asserted nowhere
+    until now), collapse back to the base key on an empty filters object, and differ per filter set and per
+    org; `quizAttempts.list` must **not** sit under `detail`'s prefix (keys.ts states this deliberately);
+    plus a sweep over all 11 LearnOrbit namespaces proving no two factories yield the same key.
+    - **Mutation result.** Rewriting `notifications.list` to drop its `userId` segment → 3 tests fail. Same
+      shape and rationale as the existing `a11y-guard`/`responsive-guard` files: an invariant spread across
+      call sites that no lint rule or type check can express.
+    - **Investigated and found NOT to be a defect** (recorded so it is not re-investigated): the per-viewer
+      keys accept `number | undefined`, which would collapse to a shared `undefined` key during auth
+      bootstrap. Every consuming hook gates on `enabled: isAuthenticated && !!accessToken`, and `userId` and
+      `accessToken` are read from the same `session.data` object, so the undefined key is not reachable on an
+      authenticated path. `useNotifications.ts`'s comment claims the gate checks "a session with an access
+      token **and user id**" — it does not literally check the id, but the effect is the same. No fix made,
+      no finding raised.
+  - **Security: no new defect found, so nothing was fixed under 9E.** The audit re-walked authentication,
+    ownership/IDOR, cross-organization isolation, parent-child authorization, moderation/report permissions,
+    notification recipient isolation, unpublished/private content, admin/superadmin boundaries, and mutation
+    authorization. Every guard checked was found **present and correct in the implementation** — G1–G6 are
+    gaps in *coverage of* those guards, not gaps in the guards. That is why 9E changed no implementation
+    code, which is the correct outcome for a testing increment: had a genuine defect been found, CLAUDE.md's
+    scope rule would have required stopping and reporting it rather than folding a fix in here.
+  - **Verification (exact, all actually run).**
+    - Backend full suite, after: **5,706 passed, 10 failed, 29 skipped** — the same 10 pre-existing
+      inherited-LearnHouse failures as the baseline, **zero regressions**, and the +18 delta is exactly the
+      18 new backend tests.
+    - **One apparent new failure was investigated and traced to a pre-existing test-isolation defect in
+      inherited LearnHouse code — not a regression, and not fixed (out of 9E's scope).** The first
+      post-change full run reported 5,705 passed / **11** failed, the extra being
+      `src/tests/security/test_active_users.py::TestRecordActivity::test_ee_records`.
+      - **Root cause, established rather than assumed.** That test calls `record_user_activity()` **without
+        mocking Redis**, and `services/security/activity.py` guards the DB insert behind a Redis day-key
+        (`activity_touched:{org}:{user}:{date}`, `SET NX` with TTL = seconds to UTC midnight). Once the key
+        exists, `record_user_activity` returns *before* `_insert_activity_row`, so the spy never fires and
+        `assert called["db"] is True` fails. **The test therefore passes only on the first run per UTC day
+        per Redis instance** — and the *baseline run itself* set `activity_touched:1:1:2026-08-24`.
+      - **Proof, not inference.** (1) The test fails in complete isolation —
+        `pytest src/tests/security/test_active_users.py::TestRecordActivity::test_ee_records` → 1 failed —
+        a run in which no 9E file is even collected. (2) The live dev Redis was queried through the app's own
+        client and held exactly one matching key, `activity_touched:1:1:2026-08-24`. (3) Deleting that key
+        and re-running the same test → **1 passed**.
+      - **A second full re-run confirmed the day-key mechanism rather than clearing it**, and is worth
+        recording because it is the trap here: that re-run also reported 5,705 / 11 with the same test
+        failing — because the isolated verification run in step (3) had itself re-created the key. Only
+        deleting the key and launching the full suite **without running that test first** yields a clean
+        result. That is the run the headline figures above come from.
+      - **Left unfixed** per this increment's scope (fixing unrelated pre-existing failures is outside 9E) —
+        recorded here with the fix for whoever owns it: mock `get_redis_client` in that test, or give it a
+        per-test unique user/org id so the day-key can never pre-exist.
+    - Focused, before → after: `test_quiz_attempts_service.py` 17 → **26 passed**;
+      `test_organization_follows_service.py` 10 → **13 passed**;
+      `test_moderation_visibility_integration.py` (new) → **6 passed**. Combined scoped run of all three:
+      **45 passed, 0 failed**.
+    - Scoped regression across the three files' original baseline set
+      (`test_quiz_attempts_service.py` + `test_organization_follows_service.py` +
+      `test_channel_videos_service.py`), before: **80 passed**.
+    - Frontend full suite, after: **264 passed, 13 failed, 2 errors** (216 → 264, i.e. the 48 new tests),
+      with an **identical failure set** to the baseline.
+    - `uvx ruff@0.15.9 check` on all three changed/new Python test files → **clean**.
+    - `bunx eslint tests/query-key-isolation.test.mjs --max-warnings=0` → **clean**.
+    - `bunx tsc --noEmit` → **clean**.
+    - `git diff --check` → **clean** (exit 0; only pre-existing CRLF-conversion warnings, which are
+      environment-level and unrelated).
+  - **Live API verification — done, and it is a change from 9A/9B's record.** Unlike those increments, the
+    API dev server **was** already running on `:1338` against the real Postgres this session, so the
+    anonymous gates 9E-1 adds tests for were additionally confirmed at the real HTTP boundary, not only
+    against the in-memory SQLite harness. Read-only, unauthenticated `curl` only — no data was written:
+    - `GET /api/v1/orgs/1/quizzes/1/attempts` → **401**, `GET /api/v1/orgs/1/quizzes/1/attempts/1` → **401**
+      — the live counterparts of 9E-1's `test_anonymous_cannot_get_an_attempt` and the existing
+      `test_anonymous_cannot_list_attempts`.
+    - `GET /api/v1/feed` → **401**, matching `test_feed_router.py::test_home_feed_rejects_anonymous_caller`.
+    - `GET /api/v1/orgs/1/progress` → **401**; `GET /api/v1/notifications` → **401**;
+      `GET /api/v1/notifications/unread-count` → **401**.
+    - `GET /api/v1/shorts` → **200 `[]`** — the unauthenticated public discovery endpoint serves, and is
+      empty because no published short is seeded (the same missing fixture 9D recorded).
+    - `GET /api/v1/users/parent-links` → **405**, i.e. wrong verb for that route, not an auth result. Noted
+      so it is not misread as a gate; not a finding.
+    - So the classification for these specific assertions is **test-verified *and* live-verified**. The
+      cross-org, cross-quiz, answer-key-strip, follow-isolation, moderation-sequence and query-key
+      assertions remain **test-verified only** — they need two seeded orgs, a seeded quiz with questions, and
+      an authenticated session, none of which exist in this environment (see the single-tenancy limitation
+      below).
+  - **Limitations — stated, not skipped.**
+    - **No live browser verification, and none was applicable.** 9E adds no UI and changes no component;
+      its one frontend increment is a pure-logic guard over a module with no runtime surface. This is
+      *not needed*, distinct from 9C/9D's genuine unverified-at-runtime items — which are carried forward
+      below, not absorbed into this line.
+    - **No authenticated or multi-org live verification.** The smoke checks above are anonymous and
+      read-only. Nothing was seeded and no session was created, so every positive-path assertion is
+      test-verified against the in-memory SQLite harness only.
+    - **The SQLite harness cannot prove FK cascade or DB-level constraint behaviour** — see 9E-3. The
+      unique-constraint idempotency paths (`IntegrityError` handling in follows/reports) are likewise
+      exercised only through their Python branch, not through a real concurrent violation.
+    - **The standing single-tenancy limitation is unchanged**: cross-org isolation can only ever be proven
+      via direct API calls with two seeded orgs, never through the browser. 9E's cross-org conclusions rest
+      on the org-scoped query predicates plus these tests, not on a live multi-org smoke test — the same
+      caveat 9A recorded.
+    - **9C/9D's genuine runtime gaps are carried forward unchanged**, not silently dropped: the Shorts snap
+      geometry, the engagement-bar wrap, the quiz timer over real answer controls, the dialogs with a real
+      on-screen keyboard, `env(safe-area-inset-bottom)` always reading `0` off-device, and 9C's H5/H6
+      keyboard checks.
+  - **Deferred / not done in 9E, with reason.**
+    - **Router-level HTTP tests for the 53 LearnOrbit endpoints on `routers/orgs/orgs.py`.** Router coverage
+      is deliberately thin by existing convention — `test_channel_videos_router.py` and
+      `test_feed_router.py` both state it: routers are tested for the boundary concerns only (query-param
+      validation, anonymous access), with behaviour proven at the service layer. Adding 53 HTTP tests would
+      re-prove service logic through a slower transport. Left as convention, not a gap.
+    - **Frontend fetch-wrapper tests.** `channelVideos.ts`, `feed.ts`, `notifications.ts`, `quizProgress.ts`,
+      `shorts.ts`, `verification.ts` etc. are thin `fetch` + `errorHandling` wrappers with no branching. The
+      established convention (recorded at 8D and 9A) is that `bun test` covers logic, not thin fetch
+      wrappers. Unchanged.
+    - **9A's F2 (rate limiting) and F3 (CSRF middleware)** remain deferred exactly as recorded — F2 as its
+      own increment, F3 to 9F.
+    - **9D's `interactiveWidget: 'resizes-content'` follow-up**, which the 9D M6 record floated as "a
+      reasonable candidate for 9E". It is a root `viewport` export affecting every page — responsive
+      infrastructure, not testing — so folding it into 9E would have been scope creep. **Explicitly declined
+      here and left as a standalone follow-up.**
+    - **`test_active_users.py::TestRecordActivity::test_ee_records`'s Redis-state dependency** (see
+      Verification). Real defect, inherited LearnHouse, one-line fix — but fixing unrelated pre-existing
+      failures is outside this increment. Recorded, not fixed.
+  - **Documentation**: this entry. `docs/ARCHITECTURE.md` was **not** updated — 9E introduced no new
+    architectural decision, API boundary, data model or security pattern; the mutation-check convention is
+    recorded here and in the test files themselves rather than promoted to an architecture decision.
+    `docs/ROADMAP.md`'s "Testing" box is now checked, with the router/fetch-wrapper conventions noted inline.
+    **Next per `docs/ROADMAP.md`: Phase 9F — Deployment plan**, the last Phase 9 item. Not started; do not
+    begin automatically. It also owns 9A's F3 CSRF-middleware decision and the deployment/infra sections of
+    `docs/SECURITY_REVIEW.md` that 9A mapped forward to it.
+
+---
+
+## Security re-verification against `docs/SECURITY_REVIEW.md` (2026-08-24, pre-9F)
+
+Not a roadmap phase — a full, item-by-item re-audit requested before Phase 9F begins. Every
+vulnerability/requirement in `docs/SECURITY_REVIEW.md` was treated as its own verification item and
+re-confirmed **against the current code**, not carried over from 9A/9E. Full evidence table lives in
+`docs/SECURITY_REVIEW.md` § "Re-verification Record — 2026-08-24 (pre-Phase-9F)" (appended; nothing in
+§1–§56 was rewritten or deleted).
+
+- **Result**: 101 items — **83 VERIFIED · 10 PARTIAL/accepted · 5 OPEN · 3 DEFERRED**.
+  **No Critical or High severity item is open.**
+
+- **Fixed this session** (scoped, test-backed, under the checklist's "small scoped security fixes"
+  allowance): **§39 unbounded pagination** on the last two uncapped LearnOrbit list endpoints.
+  - `apps/api/src/routers/notifications.py` — `GET /notifications` `page`/`limit` now
+    `Query(ge=1)` / `Query(ge=1, le=100)`.
+  - `apps/api/src/routers/orgs/orgs.py` — same cap on
+    `GET /orgs/{org_id}/videos/{channelvideo_id}/comments`.
+  - Matches the 9B-1 convention already used by `/shorts`, `/feed`, `/orgs/{id}/questions`,
+    `/orgs/{id}/reports`. Both service layers offset/limit unclamped, so these were real unbounded reads.
+  - Regression tests in `src/tests/routers/test_notifications_router.py` and
+    `test_channel_videos_router.py` (out-of-range → 422, in-range → 200). **Mutation-verified**: reverting
+    the `/notifications` cap makes `test_notifications_rejects_out_of_range_pagination_params` fail.
+
+- **New finding, reported not fixed — quiz time limit is client-only (MEDIUM, §45 / §2.19).**
+  `services/orgs/quiz_attempts.py::submit_quiz_attempt` validates ownership, rejects non-`in_progress`
+  (409) and unknown/duplicate question ids (422), but never compares `now` to
+  `started_at + quiz.time_limit_minutes`. `apps/web/components/Objects/Channel/QuizTimer.tsx` is the only
+  enforcement, so a student can let the timer expire and still submit. Phase 6F recorded the timer as a
+  deliberate client-side implementation but never recorded it as an accepted *security* limitation — it is
+  now recorded as OPEN. **Deliberately not fixed here**: the remedy needs a product decision (reject with
+  409 vs. accept and mark the attempt expired/ungraded), and those produce materially different
+  student-facing behavior.
+
+- **Still open / deferred, unchanged and re-confirmed against current code**:
+  - **F2 rate limiting (§21, §2.17, §54.16 — MEDIUM, OPEN).** `check_rate_limit` exists and is wired into
+    auth/admin/AI/invite/password-reset, but **zero** LearnOrbit mutation endpoints use it. Still its own
+    future increment.
+  - **F3 CSRF (§11, §54.9 — MEDIUM, DEFERRED to 9F).** `security/csrf.py::CSRFProtectionMiddleware` is
+    implemented and tested but never registered — `apps/api/app.py` adds only CORS + GZip + EE hooks.
+    Mitigated, not eliminated, by `SameSite=Lax` on `LH_access`/`LH_refresh`.
+
+- **Non-LearnOrbit / inherited LOW gaps, recorded for separate increments** (deliberately not fixed —
+  infrastructure changes outside this task's scope): no `Permissions-Policy` header (§30); API Dockerfile
+  has no `USER` directive so the container runs as root (§34); no `permissions:` block in any
+  `.github/workflows/` file (§35); `images.remotePatterns: hostname: '**'` in `apps/web/next.config.js`
+  gives the Next image optimizer an arbitrary-host server-side fetch (§15).
+
+- **Verification** (all actually run):
+  - `TESTING=true uv run pytest src/tests/security/` → **1331 passed, 4 skipped, 1 failed** —
+    `test_active_users.py::TestRecordActivity::test_ee_records`, the pre-existing EE-gate failure already
+    recorded in the 9E entry (`is_ee_available()` is False because `ee/hooks.py` is absent API-side).
+    Unrelated to this diff.
+  - `pytest` over 15 LearnOrbit router/service suites (feed, shorts, notifications, channel videos, parent
+    links, quizzes, quiz attempts, questions, reports, follows, SSRF guard, link preview) → **295 passed**.
+  - `uvx ruff@0.15.9 check` on the 4 changed Python files → **All checks passed**.
+  - `bunx tsc --noEmit` in `apps/web` → **clean**.
+  - ESLint **not run — no frontend file changed** in this diff.
+  - `git diff --check` → clean (CRLF advisories only, pre-existing repo-wide).
+  - **Browser verification not attempted** — no UI change. Separately, browser-level cross-org isolation
+    (§6, §3.5) remains unprovable locally: `tenancy: single` collapses org routing, and `multi` is
+    hard-rejected on localhost domains. Verified at service/router level instead.
+
+- **Documentation**: `docs/SECURITY_REVIEW.md` (Re-verification Record appended) and this entry.
+  `docs/ARCHITECTURE.md` **not** updated — no new architectural decision. `docs/ROADMAP.md` **not**
+  touched, per instruction.
+
+- **Git**: no commit, no push. Working tree left as-is.
+
+- **Next**: **Phase 9F — Deployment plan** (unchanged), which owns F3 CSRF-middleware registration.
+  Before or alongside it, the quiz time-limit product decision above needs an answer. Not started.
+
+### Security re-verification — second pass: checklist reconciliation (2026-08-24)
+
+Continuation of the entry above, not a restart. Goal: make `docs/SECURITY_REVIEW.md` self-reporting, so
+opening it shows immediately which original requirements are complete and which are outstanding.
+
+- **No code changed in this pass.** The only code changes from this audit remain the two §39 pagination
+  caps recorded in the previous entry.
+
+- **`docs/SECURITY_REVIEW.md` — reconciled in place, original wording preserved:**
+  - The document's **only literal checklist** is §54's 24-item block (it was lines 1709–1732; the §2 rules
+    and §§ headings are numbered prose, not checkboxes). Those 24 `[ ]` boxes are now **marked in place**,
+    question wording untouched, each outstanding one annotated inline with its status and a §-reference.
+  - Added **§1a Status Index** immediately after §1 Purpose — a status view over the existing IDs and
+    wording (not a new checklist), leading with a short table of only the outstanding items.
+  - Normalised every status in the appended Re-verification Record to the five-value vocabulary
+    `[x]` / `[ ] OPEN` / `[ ] DEFERRED` / `[ ] INHERITED` / `[ ] N/A`, replacing the earlier
+    `[~] PARTIAL` / `[D]` markers so there is one consistent view.
+  - Nothing in §1–§56 was rewritten or deleted.
+
+- **Final reconciliation: 101 items — 84 `[x]` · 5 OPEN · 7 DEFERRED · 4 INHERITED · 1 N/A.**
+  **No Critical or High severity item is outstanding.**
+
+- **New finding this pass — link-preview error detail leak (LOW, §19 / §54.15, OPEN).**
+  `apps/api/src/services/utils/link_preview.py:98` and `:105` return `detail=str(exc)` from
+  `SSRFBlockedError`, so the caller receives the internal detail verbatim — e.g. the blocked private IP a
+  hostname resolved to, or the rebinding message naming the validated address set. That turns the
+  link-preview endpoint into an internal-network oracle, which is exactly what §19 and §2.12 forbid.
+  **Reported, not fixed:** `src/tests/services/test_link_preview_service.py:169, 210, 230, 284` assert on
+  those exact strings, so changing the message rewrites an error contract four existing tests encode as
+  intentional. That is beyond a scoped fix and needs a decision rather than a silent edit.
+
+- **Outstanding, by root cause** (5 OPEN rows, 7 DEFERRED rows, but only 4 distinct causes):
+  - Quiz time limit not enforced server-side — §2.19, §45, §54.23 (MEDIUM, OPEN, needs product decision)
+  - Link-preview error detail leak — §19, §54.15 (LOW, OPEN, new this pass)
+  - **F2** rate limiting — §2.17, §21, §22, §54.16, §54.17 (MEDIUM, DEFERRED, own increment)
+  - **F3** CSRF middleware registration — §11, §54.9 (MEDIUM, DEFERRED to 9F)
+  - Plus 4 INHERITED LOW infra gaps (§15 `remotePatterns: '**'`, §30 `Permissions-Policy`,
+    §34 API container runs as root, §35 no workflow `permissions:` block) and §43 Payments N/A (EE-only).
+
+- **Verification completed this pass** (all actually run):
+  - `dangerouslySetInnerHTML` sweep of `apps/web` → exactly 3 sinks, all sanitised
+    (`EmbedBlockComponent.tsx`, `EmbedObjectsComponent.tsx` via DOMPurify; `JsonLd.tsx` via
+    `serializeJsonLd`), none in LearnOrbit-authored components — §10 confirmed.
+  - `detail=str(exc)` / `traceback` sweep of `apps/api/src/services` → surfaced the §19 finding above;
+    no other error path leaks internals.
+  - Secret-logging sweep → the three matches log *failures about* secrets, never a secret value — §20.
+  - Migration coverage → every LearnOrbit table has one (`add_channel_video_table`,
+    `add_channel_video_engagement_tables`, `add_organization_follows_table`,
+    `add_parent_child_link_table`, `add_quiz_attempt_tables`, `add_notification_table`,
+    `add_channel_video_report_table`, `add_channel_type_to_organization`) — §23.
+  - `pytest src/tests/security/` re-run → **1331 passed, 4 skipped, 1 pre-existing EE failure**
+    (`test_active_users.py::TestRecordActivity::test_ee_records`), unchanged.
+  - `pytest` over the 15 LearnOrbit router/service suites re-run → **295 passed**.
+  - `git diff --check` → clean (CRLF advisories only, pre-existing repo-wide).
+  - Ruff / tsc / ESLint: not re-run — **no code file changed in this pass**; the previous entry's results
+    stand.
+  - Browser verification: not attempted, no UI change.
+
+- **Documentation**: `docs/SECURITY_REVIEW.md` (§1a index, §54 marked in place, record normalised) and
+  this entry. `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` **not** touched.
+
+- **Git**: no commit, no push.
+
+- **Next**: **Phase 9F — Deployment plan** (unchanged), which owns F3. Two product decisions are queued
+  ahead of / alongside it: the quiz time-limit behavior (§45) and whether to change the link-preview
+  error contract (§19). Not started.
+
+### Security fix — server-side quiz time-limit enforcement (2026-08-24)
+
+Resolves the OPEN finding raised by the security re-verification above (`docs/SECURITY_REVIEW.md`
+§2.19, §45, §54.23). **Decision taken by the user: enforce server-side and reject a late
+submission as expired rather than grading it.** This is a scoped security fix, not a new phase.
+
+- **The hole**: `submit_quiz_attempt` validated ownership, attempt status and question ids, but never
+  compared `now` to `started_at + quiz.time_limit_minutes`. The limit existed only in
+  `apps/web/components/Objects/Channel/QuizTimer.tsx`, so a student who let the timer expire — or any
+  client that never ran it — could still have a late attempt graded normally.
+
+- **Files changed** (2):
+  - `apps/api/src/services/orgs/quiz_attempts.py` — new `_require_within_time_limit(quiz, attempt)`,
+    called from `submit_quiz_attempt` right after the existing `status != "in_progress"` check and
+    **before** answer-shape validation and the grader. Late submission → `409 "This attempt has
+    expired"`. Added `timedelta` to the `datetime` import.
+  - `apps/api/src/tests/services/test_quiz_attempts_service.py` — 11 new cases; the existing
+    `_published_quiz_with_questions` helper gained an optional `time_limit_minutes=None` parameter
+    (every existing caller is unaffected).
+
+- **Design decisions, deliberately scoped small**:
+  - **No state change on rejection.** The attempt stays `in_progress`, no `QuizAnswer` rows, score
+    untouched. A terminal `"expired"` status was *not* added — `db/quiz_attempts.py` documents the
+    vocabulary as `"in_progress" | "submitted" | "graded"`, so a fourth value is a schema/vocabulary
+    change rather than the minimum enforcement. Available as a follow-up if expired attempts should
+    appear in history.
+  - **Inclusive deadline** — only `now > deadline` expires; a 30-minute quiz means 30 minutes.
+  - **No clock-skew grace window** — adding one is a product decision, not a security default.
+  - **Fail closed** — a *timed* attempt whose `started_at` is empty or unparseable is refused, since
+    it cannot be shown to be inside its window. Untimed quizzes short-circuit before any parsing and
+    are completely unaffected.
+  - **Timezone correctness**: `started_at` is written by `_now()` as a naive string that already means
+    UTC, so it is re-stamped UTC only when `tzinfo is None`; an offset-aware value is honoured, not
+    clobbered. Comparing against a local-time `now` would shift every deadline by the server offset.
+
+- **Frontend unchanged.** `QuizTimer.tsx` is now a convenience only. `attempt.tsx`'s existing
+  `handleSubmit` catch already renders a failed submission as `submitError`, so a 409 shows as a
+  message rather than breaking the page. The timer's auto-submit fires *at* the deadline, which the
+  inclusive boundary accepts; only genuinely late arrivals are refused. If slow connections turn out
+  to push legitimate auto-submits past the deadline, an explicit grace window is the fix — flagged,
+  not assumed.
+
+- **Verification** (all actually run):
+  - `TESTING=true uv run pytest src/tests/services/test_quiz_attempts_service.py` → **38 passed**
+    (26 pre-existing + 12 new test ids from 11 cases, one parametrized ×2).
+  - Quiz/question service suites + `test_quiz_attempt_model.py` + `test_quiz_model.py` + the entire
+    `src/tests/routers/` tree → **948 passed, 0 failed** (247 s).
+  - **Mutation-verified three ways**, each breaking a different test, so no property passes by
+    accident: deleting the guard call → 5 rejection tests fail; `>` → `>=` → the exact-deadline test
+    fails; dropping the `tzinfo is None` guard → the offset-aware test fails. Guard restored and
+    re-passing after each.
+  - Note: the first drafts of the boundary and timezone tests **survived** mutations 2 and 3 — wall
+    clock can never hit the deadline to the microsecond, and a `+02:00` offset happens to fail safe.
+    Both were rewritten (a `_ClockAt` stand-in freezing the module's `datetime.now`, and a `-05:00`
+    offset) until they actually bit.
+  - `uvx ruff@0.15.9 check` on both changed files → **All checks passed**.
+  - `git diff --check` → clean (CRLF advisories only, pre-existing repo-wide).
+  - No frontend file changed → ESLint/tsc not re-run.
+  - Browser verification not attempted — no UI change.
+
+- **Checklist impact**: §2.19, §45 and §54.23 flip from OPEN to `[x]`, including the in-place §54
+  checkbox. `docs/SECURITY_REVIEW.md` totals are now **101 items — 87 `[x]` · 2 OPEN · 7 DEFERRED ·
+  4 INHERITED · 1 N/A**. Exactly one unfixed root cause remains in LearnOrbit-owned code: the
+  link-preview error-detail leak (§19 / §54.15, LOW).
+
+- **Documentation**: `docs/SECURITY_REVIEW.md` (§1a index, §54 checkbox, record rows, totals, and a
+  new "Time-Limit Enforcement" note) and this entry. `docs/ARCHITECTURE.md` **not** updated — this
+  applies an existing security pattern (server-side authorization of a client-visible constraint), it
+  does not introduce a new one. `docs/ROADMAP.md` untouched.
+
+- **Git**: no commit, no push.
+
+- **Next**: **Phase 9F — Deployment plan**, which owns F3 CSRF-middleware registration. One decision
+  still queued: whether to change the link-preview error contract (§19). Not started.
+
+### Security fix — link-preview SSRF error-detail disclosure (2026-08-24)
+
+Resolves the last OPEN finding from the security re-verification (`docs/SECURITY_REVIEW.md` §19,
+§54.15, LOW). Scoped security fix, not a new phase.
+
+- **The leak**: `apps/api/src/services/utils/link_preview.py` raised
+  `HTTPException(400, detail=str(exc))` for both SSRF-guard rejections, handing the caller the
+  guard's own words — the private address a hostname resolved to, or the peer plus validated
+  address set from a rebinding detection. The guard blocked the fetch but the error narrated what
+  it had found, making the preview endpoint an internal-network oracle.
+
+- **Files changed** (2):
+  - `apps/api/src/services/utils/link_preview.py` — added `logging` + module `logger`; new
+    `_BLOCKED_URL_DETAIL = "This URL cannot be previewed"` returned for **every** guard rejection,
+    with `logger.warning("Link preview blocked by SSRF guard: %s", exc)` preserving the real cause
+    server-side.
+  - `apps/api/src/tests/services/test_link_preview_service.py` — the four tests that intentionally
+    asserted the leaked strings now assert the generic message *and* the absence of the internal
+    token; 5 new regression cases added (7 test ids, one parametrized ×4).
+
+- **Why one message for all four reasons**: disallowed scheme, blocked hostname, blocked address
+  range and DNS rebinding all collapse to the same string. A per-reason message leaks the same
+  topology more slowly — an attacker could still separate "blocked because private range" from
+  "blocked because bad scheme" and walk the network that way.
+
+- **Pattern reused, not invented**: `services/orgs/custom_domains.py:597-603` already handled the
+  identical case exactly this way (log the detail, return a fixed generic message).
+  `link_preview.py` was the outlier and now matches.
+
+- **Deliberately not changed**: `services/webhooks/dispatch.py` also records
+  `f"SSRF guard: {e}"`, but into `WebhookDeliveryLog.error_message` — a server-side delivery log
+  read by the org admin who supplied that URL, not a response to an arbitrary caller. Different
+  risk class; left alone.
+
+- **Residual, recorded not fixed**: the 400 status code itself still separates "SSRF-blocked" from
+  every other preview failure (those return 200 + minimal preview card), leaving a binary
+  "does this host resolve privately?" oracle with no address disclosed. Closing it means returning
+  `_minimal_preview(url)` on a block too, which changes the endpoint contract from 400 to 200 — a
+  product/API decision, so it is documented rather than assumed. Much weaker than the original
+  leak; does not keep §19 open.
+
+- **Verification** (all actually run):
+  - `pytest src/tests/services/test_link_preview_service.py` → **28 passed**.
+  - link-preview + SSRF-guard + the entire `src/tests/security/` tree + `test_utils_router.py` →
+    **1379 passed, 4 skipped, 1 failed** — the pre-existing
+    `test_active_users.py::TestRecordActivity::test_ee_records` EE-gate failure, unrelated.
+  - **Mutation-verified three ways**: restoring `detail=str(exc)` → 10 tests fail; appending the
+    reason to the generic message → 10 tests fail (indistinguishability test bites); deleting the
+    `logger.warning` calls → 2 tests fail, so the server-side diagnostics are asserted rather than
+    assumed. Restored and re-passing after each.
+  - Repo-wide grep confirmed nothing else depended on the old strings — the only other matches are
+    the guard itself, its own tests, and the untouched webhooks/custom-domains paths. **No frontend
+    dependency**, so no UI change was needed.
+  - `uvx ruff@0.15.9 check` on both changed files → **All checks passed**.
+  - `git diff --check` → clean (CRLF advisories only, pre-existing repo-wide).
+  - No frontend file changed → ESLint/tsc not re-run. Browser verification not attempted.
+
+- **Checklist impact**: §19 and §54.15 flip to `[x]`, including the in-place §54 checkbox.
+  `docs/SECURITY_REVIEW.md` totals are now **101 items — 89 `[x]` · 0 OPEN · 7 DEFERRED ·
+  4 INHERITED · 1 N/A**. **No OPEN item remains in LearnOrbit-owned code**; everything still
+  outstanding is deferred by plan (F2, F3) or inherited infrastructure.
+
+- **Documentation**: `docs/SECURITY_REVIEW.md` (§1a index, §54 checkbox, record rows, totals, and a
+  new "Error-Detail Disclosure" note) and this entry. `docs/ARCHITECTURE.md` **not** updated — this
+  applies an existing convention rather than introducing one. `docs/ROADMAP.md` untouched.
+
+- **Git**: no commit, no push.
+
+- **Next**: **Phase 9F — Deployment plan**, which owns F3 CSRF-middleware registration. F2 (rate
+  limiting) remains its own increment. No decisions are queued. Not started.
+
+---
+
+## F2 — Rate Limiting (2026-08-24, security increment, pre-9F)
+
+The rate-limiting increment queued by 9A / the 2026-08-24 security re-verification. Closes
+`docs/SECURITY_REVIEW.md` **F2** — §2 rule 17, §21, §22, §54.16, §54.17. Scoped to F2 only:
+quiz server-side expiry, the link-preview error leak, 9F and the CSRF decision were all left
+alone, and no inherited LearnHouse/EE infrastructure was modified.
+
+- **Existing infrastructure reused, not replaced.** `services/security/rate_limiting.py` already
+  had `check_rate_limit` (Redis counter + TTL, `rate_limit:` key namespace) plus a family of
+  `check_*` / `enforce_*` wrappers used by auth, AI, invites, search and the admin API — but no
+  LearnOrbit endpoint called any of them. Two functions were added to that same module on top of
+  the same primitive: `check_learnorbit_rate_limit()` and `enforce_learnorbit_rate_limit()`. No new
+  Redis architecture, no middleware, no new dependency, no schema change.
+
+- **Strategy.** One table, `LEARNORBIT_RATE_LIMITS`, holds `(max_attempts, window_seconds)` per
+  *action*. Handlers name an action, never a raw key, so buckets cannot drift per endpoint. The
+  enforce call is the **first statement** of every protected handler, so a rejected request never
+  reaches the service and never writes. Keyed `lo:{action}:user:{id}` for authenticated callers
+  (via `resolve_acting_user_id`, so API tokens resolve to their creator) and
+  `lo:{action}:ip:{client_ip}` for anonymous ones, capped tighter at
+  `LEARNORBIT_ANON_MAX_ATTEMPTS = 20`. The key deliberately contains **no request parameters**, so
+  re-pointing the same action at a different org/video/comment does not reset the counter.
+  Rejections return 429 with `Retry-After` and the codebase's existing
+  `{"code": "RATE_LIMITED", ...}` envelope, so the frontend needed no change.
+
+- **Endpoints protected — 36.** 33 in `apps/api/src/routers/orgs/orgs.py`, 3 in
+  `apps/api/src/routers/users.py`:
+  - `follow_toggle` (60/min) — `POST`/`DELETE /{org_id}/follow`
+  - `reaction_toggle` (120/min) — like and save, `POST`/`DELETE` each
+  - `share_create` (60/min) — `POST …/share`
+  - `comment_write` (20/min) — comment create, update, delete
+  - `report_create` (10/hour) — `POST …/report`
+  - `moderation_write` (60/min) — report resolve, org verification
+  - `content_write` (60/min) — 19 routes: channel video / resource / question / quiz CRUD,
+    publish toggles, quiz-question attach/reorder/detach
+  - `quiz_attempt_start` (30/hour) — `POST …/quizzes/{quiz_id}/attempts`
+  - `parent_link_write` (10/hour) — parent-link request, respond, revoke
+    (these three handlers gained a `request: Request` parameter so anonymous callers can be
+    IP-keyed; no behaviour change otherwise)
+
+- **Limits chosen so a fast, legitimate human never notices.** Shorts reactions get the loosest
+  ceiling (120/min) because scrolling is the fastest real interaction on the platform; comments the
+  tightest per-minute one (20/min) because it is the top spam vector; reports and parent-link
+  requests are hourly (10/hour) because both push work or notifications onto *another person*.
+  `content_write` is generous (60/min) so a teacher bulk-authoring a question bank is never
+  blocked. Full per-action rationale table in `docs/SECURITY_REVIEW.md` § "Rate Limiting (F2)".
+
+- **Intentionally unprotected, recorded not overlooked.**
+  - `POST …/attempts/{attempt_id}/submit` — an attempt submits exactly once (409 after that), so
+    `quiz_attempt_start` already bounds it, and a 429 here would discard a student's finished quiz.
+    It is the single entry in `EXPECTED_UNPROTECTED` in the router test, so it fails the build if
+    it ever stops being a deliberate choice.
+  - `PATCH /notifications/{uuid}/read`, `PATCH /notifications/read-all` — caller's own rows only,
+    no fan-out, nothing exposed.
+  - Read-only endpoints — out of scope by the review's own guidance; §39 page-size caps already
+    bound them.
+
+- **Fail-open on Redis failure — a deliberate, documented decision.** If Redis is unconfigured or
+  unreachable the LearnOrbit limiter allows the request, logs a warning and backs off for 30s
+  instead of re-dialling per request. `core/redis.py` already treats Redis as optional and degrades;
+  these are engagement endpoints with nothing to brute-force, and a cache-tier blip must not take
+  comments/likes/follows down platform-wide. Auth-side helpers keep their stricter behaviour
+  unchanged. Residual risk (no ceilings during an outage) is recorded in `SECURITY_REVIEW.md`;
+  closing it needs an availability trade or a per-worker counter, both beyond F2.
+
+- **Tests — 29 new.**
+  - `apps/api/src/tests/services/test_learnorbit_rate_limiting_service.py` (20) — ceiling
+    allow/deny, per-user isolation, per-action isolation, parameter-tampering resistance, anonymous
+    IP keying, anonymous ceiling never looser, per-IP isolation, user bucket separate from the IP
+    bucket, window expiry, TTL always set, 429 envelope + `Retry-After`, no information leak,
+    fail-open, backoff, reset.
+  - `apps/api/src/tests/routers/test_learnorbit_rate_limits_router.py` (9) — a route-coverage test
+    that enumerates every LearnOrbit mutation route and fails on any unprotected one, a
+    declared-action test, a "limiter runs first" test, and six over-HTTP tests.
+  - `apps/api/src/tests/fixtures/fake_redis.py` (new) and an autouse `isolated_rate_limit_store`
+    fixture in `apps/api/src/tests/conftest.py` give every test its own in-memory store — the
+    limiter now runs inside the endpoints under test, CI has no Redis, and a dev machine usually
+    has the dev Redis up, so without this the suite would behave differently in each place and
+    accumulate counters across reruns.
+  - **Mutation-verified four ways**: dropping the limiter from one handler → the coverage test
+    fails; making the limiter always allow → 14 tests fail; keying anonymous callers to one shared
+    bucket → 3 tests fail; moving the limiter after the service call → the ordering test fails.
+    Restored and re-passing after each.
+
+- **Verification.**
+  - Focused: `pytest src/tests/services/test_learnorbit_rate_limiting_service.py
+    src/tests/routers/test_learnorbit_rate_limits_router.py` → **29 passed**.
+  - LearnOrbit regression (the pre-change baseline set, re-run): orgs / parent-links /
+    notifications / channel-videos / shorts / feed routers + AI-rate-limit, search, auth, invite
+    hardening and resource-exhaustion security tests → **244 passed**. The same LearnOrbit router
+    baseline was **137 passed** before any change, and all 137 still pass.
+  - Full API suite: **5757 passed, 29 skipped, 11 failed (15:12)**. All 11 failures are
+    **pre-existing and unrelated** — proven by re-running them with every file this increment
+    touched stashed, which reproduces the same 11: three EE-gate tests
+    (`test_core_events.py::test_register_ee_helpers_and_startup`,
+    `test_core_events_runtime.py::test_ee_hook_registration_and_paid_access`,
+    `test_active_users.py::TestRecordActivity::test_ee_records`), three
+    `test_custom_domains_service.py`, three `test_org_invites_service.py`, two
+    `test_podcasts_service.py`. Only `test_ee_records` was previously recorded; the other ten are
+    newly *observed* here, not newly *caused* — the earlier security session ran a subset, never
+    the full suite. All sit in inherited LearnHouse code (podcast listing RBAC, custom domains,
+    invite codes, EE gating) that F2 does not touch.
+  - `uvx ruff@0.15.9 check` on all changed backend files → **All checks passed**.
+  - `git diff --check` → clean (CRLF advisories only, pre-existing repo-wide).
+  - No frontend file changed → ESLint/tsc not re-run. No browser verification: backend-only
+    increment, no UI change, and the 429 envelope is the one the frontend already handles.
+
+- **Files changed**: `apps/api/src/services/security/rate_limiting.py`,
+  `apps/api/src/routers/orgs/orgs.py`, `apps/api/src/routers/users.py`,
+  `apps/api/src/tests/conftest.py`; new — `apps/api/src/tests/fixtures/fake_redis.py`,
+  `apps/api/src/tests/services/test_learnorbit_rate_limiting_service.py`,
+  `apps/api/src/tests/routers/test_learnorbit_rate_limits_router.py`.
+
+- **Checklist impact**: §2.17, §21, §22, §54.16 and §54.17 flip to `[x]`, including the in-place
+  §54 checkboxes. `docs/SECURITY_REVIEW.md` totals are now **101 items — 94 `[x]` · 0 OPEN ·
+  2 DEFERRED · 4 INHERITED · 1 N/A**. The only remaining DEFERRED items are §11 and §54.9, both
+  **F3 CSRF middleware**, which belongs to Phase 9F.
+
+- **Documentation**: `docs/SECURITY_REVIEW.md` (§1a index, "Everything else", totals, §54
+  checkboxes, record rows 2.17 / §21 / §22 / 54.16 / 54.17, the "Recommended fixes before Phase 9F"
+  list, and a new "Rate Limiting (F2)" note) and this entry. `docs/ARCHITECTURE.md` **not** updated
+  — F2 reuses an existing helper family and its existing conventions rather than introducing an
+  architectural decision. `docs/ROADMAP.md` untouched (no roadmap milestone changed).
+
+- **Git**: no commit, no push.
+
+- **Next**: **Phase 9F — Deployment plan**, the last Phase 9 item, which owns the F3 CSRF-middleware
+  registration decision (§11 / §54.9). Not started; do not begin automatically.

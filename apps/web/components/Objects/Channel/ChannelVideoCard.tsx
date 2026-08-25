@@ -93,6 +93,8 @@ export default function ChannelVideoCard({ channelVideo, orgslug, orgId, channel
           <img
             src={channelVideo.thumbnail_image}
             alt=""
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover"
           />
         ) : (

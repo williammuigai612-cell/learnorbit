@@ -160,3 +160,92 @@ async def test_follow_is_isolated_per_user(db, org, admin_user, regular_user):
 
     assert status_for_other_user.is_following is False
     assert status_for_other_user.follower_count == 1
+
+
+# ── Phase 9E: per-channel isolation ─────────────────────────────────────────
+#
+# follows.py scopes every read and write by `org_id` — the follow lookup in
+# get_follow_status/follow/unfollow, and `_follower_count`'s aggregate. Before
+# 9E nothing exercised that predicate: every existing test used the single
+# `org` fixture, so a service that ignored org_id entirely would have passed
+# the whole file. Following is the input to the Phase 4G home feed, so a
+# leaked follow edge is a content-visibility bug, not just a wrong number.
+#
+# Mutation-checked during 9E — see docs/PROGRESS.md Phase 9E.
+
+
+@pytest.mark.asyncio
+async def test_following_one_channel_does_not_follow_another(db, org, other_org, regular_user):
+    """SECURITY/isolation: the follow edge is (org, user). Following `org`
+    must leave `other_org` untouched for the same user."""
+    await follow_organization(
+        request=None, org_id=org.id, current_user=regular_user, db_session=db
+    )
+
+    here = await get_follow_status(
+        request=None, org_id=org.id, current_user=regular_user, db_session=db
+    )
+    there = await get_follow_status(
+        request=None, org_id=other_org.id, current_user=regular_user, db_session=db
+    )
+
+    assert here.is_following is True
+    assert there.is_following is False
+
+
+@pytest.mark.asyncio
+async def test_follower_count_is_scoped_to_its_own_channel(
+    db, org, other_org, admin_user, regular_user
+):
+    """`_follower_count` filters on org_id. Two followers on `org` and one on
+    `other_org` must be reported as 2 and 1, never 3 — a count that summed
+    across channels would inflate every channel's follower badge."""
+    await follow_organization(
+        request=None, org_id=org.id, current_user=regular_user, db_session=db
+    )
+    await follow_organization(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db
+    )
+    await follow_organization(
+        request=None, org_id=other_org.id, current_user=regular_user, db_session=db
+    )
+
+    here = await get_follow_status(
+        request=None, org_id=org.id, current_user=regular_user, db_session=db
+    )
+    there = await get_follow_status(
+        request=None, org_id=other_org.id, current_user=regular_user, db_session=db
+    )
+
+    assert here.follower_count == 2
+    assert there.follower_count == 1
+
+
+@pytest.mark.asyncio
+async def test_unfollowing_one_channel_leaves_the_other_intact(
+    db, org, other_org, regular_user
+):
+    """The delete in unfollow_organization is scoped by org_id too — a user
+    following both channels who leaves one must still follow the other."""
+    await follow_organization(
+        request=None, org_id=org.id, current_user=regular_user, db_session=db
+    )
+    await follow_organization(
+        request=None, org_id=other_org.id, current_user=regular_user, db_session=db
+    )
+
+    await unfollow_organization(
+        request=None, org_id=org.id, current_user=regular_user, db_session=db
+    )
+
+    here = await get_follow_status(
+        request=None, org_id=org.id, current_user=regular_user, db_session=db
+    )
+    there = await get_follow_status(
+        request=None, org_id=other_org.id, current_user=regular_user, db_session=db
+    )
+
+    assert here.is_following is False
+    assert here.follower_count == 0
+    assert there.is_following is True
+    assert there.follower_count == 1

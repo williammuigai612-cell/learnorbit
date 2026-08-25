@@ -13,6 +13,8 @@ import {
   unsaveChannelVideo,
   type ChannelVideoSaveStatus,
   listChannelVideoComments,
+  CHANNEL_VIDEO_COMMENTS_LIMIT,
+  CHANNEL_VIDEO_COMMENTS_PREVIEW_LIMIT,
   createChannelVideoComment,
   updateChannelVideoComment,
   deleteChannelVideoComment,
@@ -126,21 +128,48 @@ export function useUnsaveChannelVideo(
 }
 
 // Phase 4C — comments. Follows the same status-query + mutation shape as the
-// Like hooks above: fetched once (no pagination UI, see channelVideos.ts),
-// cache updated directly via setQueryData rather than a refetch round-trip.
+// Like hooks above: cache updated directly via setQueriesData rather than a
+// refetch round-trip.
+//
+// Phase 9B: `expanded` selects between a small preview (panel closed — the
+// trigger only needs a count badge) and the full fetch (panel open). The
+// panel is mounted on every watch page and on both Shorts rails, so the
+// unconditional 100-row fetch it used to issue was paid even by viewers who
+// never opened it. The limit is part of the query key, so the preview can
+// never be mistaken for the complete list.
 export function useChannelVideoComments(
   orgId: number | undefined,
-  channelVideoId: number | string | undefined
+  channelVideoId: number | string | undefined,
+  expanded = true
 ) {
   const session = useLHSession() as any
   const accessToken = session?.data?.tokens?.access_token as string | undefined
+  const limit = expanded
+    ? CHANNEL_VIDEO_COMMENTS_LIMIT
+    : CHANNEL_VIDEO_COMMENTS_PREVIEW_LIMIT
 
   return useQuery<ChannelVideoComment[]>({
-    queryKey: queryKeys.channelVideos.comments(orgId!, channelVideoId!),
-    queryFn: () => listChannelVideoComments(orgId!, channelVideoId!, accessToken),
+    queryKey: queryKeys.channelVideos.commentsPage(orgId!, channelVideoId!, limit),
+    queryFn: () => listChannelVideoComments(orgId!, channelVideoId!, accessToken, limit),
     enabled: !!orgId && !!channelVideoId,
     staleTime: 30_000,
   })
+}
+
+// Keeps the preview and full-fetch cache entries in step: prefix-matching the
+// base comments key updates every `limit` variant in one call, so a comment
+// posted or removed while the panel is open is also reflected in the badge
+// count the closed trigger reads.
+function updateCommentCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  orgId: number,
+  channelVideoId: number | string,
+  updater: (_prev: ChannelVideoComment[] | undefined) => ChannelVideoComment[]
+) {
+  queryClient.setQueriesData<ChannelVideoComment[]>(
+    { queryKey: queryKeys.channelVideos.comments(orgId, channelVideoId) },
+    updater
+  )
 }
 
 export function useCreateChannelVideoComment(
@@ -155,8 +184,10 @@ export function useCreateChannelVideoComment(
     mutationFn: (content: string) =>
       createChannelVideoComment(orgId!, channelVideoId!, content, accessToken!),
     onSuccess: (comment: ChannelVideoComment) => {
-      const key = queryKeys.channelVideos.comments(orgId!, channelVideoId!)
-      queryClient.setQueryData<ChannelVideoComment[]>(key, (prev) => [comment, ...(prev ?? [])])
+      updateCommentCaches(queryClient, orgId!, channelVideoId!, (prev) => [
+        comment,
+        ...(prev ?? []),
+      ])
     },
   })
 }
@@ -173,8 +204,7 @@ export function useUpdateChannelVideoComment(
     mutationFn: ({ commentUuid, content }: { commentUuid: string; content: string }) =>
       updateChannelVideoComment(orgId!, channelVideoId!, commentUuid, content, accessToken!),
     onSuccess: (comment: ChannelVideoComment) => {
-      const key = queryKeys.channelVideos.comments(orgId!, channelVideoId!)
-      queryClient.setQueryData<ChannelVideoComment[]>(key, (prev) =>
+      updateCommentCaches(queryClient, orgId!, channelVideoId!, (prev) =>
         (prev ?? []).map((c) => (c.comment_uuid === comment.comment_uuid ? comment : c))
       )
     },
@@ -227,8 +257,7 @@ export function useDeleteChannelVideoComment(
     mutationFn: (commentUuid: string) =>
       deleteChannelVideoComment(orgId!, channelVideoId!, commentUuid, accessToken!),
     onSuccess: (_data, commentUuid) => {
-      const key = queryKeys.channelVideos.comments(orgId!, channelVideoId!)
-      queryClient.setQueryData<ChannelVideoComment[]>(key, (prev) =>
+      updateCommentCaches(queryClient, orgId!, channelVideoId!, (prev) =>
         (prev ?? []).filter((c) => c.comment_uuid !== commentUuid)
       )
     },

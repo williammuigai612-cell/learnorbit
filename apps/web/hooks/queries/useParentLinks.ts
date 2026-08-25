@@ -9,6 +9,7 @@ import {
   listPendingParentLinks,
   requestParentLink,
   respondToParentLink,
+  revokeParentLink,
   type ChildQuizProgressSummary,
   type ParentChildLink,
 } from '@services/users/parentLinks'
@@ -88,5 +89,27 @@ export function useChildQuizProgress(childUserId: number | undefined) {
     // authorization fact, not a transient failure. Retrying it just delays
     // the correct "can't show this" state reaching the user.
     retry: false,
+  })
+}
+
+// Phase 9A (security review, F1) — withdraw an APPROVED link. Either party may
+// revoke; for the child this is consent withdrawal, which immediately cuts off
+// the parent's access to their cross-org quiz progress. Invalidates the child
+// progress cache too, so a revoked parent's stale activity view can't linger.
+export function useRevokeParentLink() {
+  const { accessToken, userId } = useAuthedSession()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (linkUuid: string) => revokeParentLink(linkUuid, accessToken!),
+    onSuccess: (updated: ParentChildLink) => {
+      queryClient.setQueryData<ParentChildLink[]>(queryKeys.parentLinks.mine(userId), (prev) =>
+        (prev ?? []).filter((link) => link.link_uuid !== updated.link_uuid)
+      )
+      queryClient.invalidateQueries({ queryKey: queryKeys.parentLinks.mine(userId) })
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.parentLinks.childProgress(updated.child_user_id),
+      })
+    },
   })
 }

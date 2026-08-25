@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
@@ -80,6 +80,22 @@ function QuestionRunner({
   const answeredCount = Object.keys(answers).length
 
   const answer = answers[question.id]
+  const promptId = React.useId()
+
+  // Phase 9C: advancing a question swapped the content underneath a focus
+  // that stayed on Next/Previous, so the new prompt was never announced —
+  // the progress line's aria-live only ever said "Question N of M". Moving
+  // focus to the prompt makes the question itself the next thing read
+  // (WCAG 2.4.3).
+  const promptRef = useRef<HTMLHeadingElement>(null)
+  const didMountRef = useRef(false)
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true
+      return
+    }
+    promptRef.current?.focus()
+  }, [index])
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -95,18 +111,29 @@ function QuestionRunner({
         </div>
       </div>
 
-      <h1 className="text-xl font-semibold text-foreground leading-snug">{question.prompt}</h1>
+      <h1
+        ref={promptRef}
+        id={promptId}
+        tabIndex={-1}
+        className="text-xl font-semibold text-foreground leading-snug focus:outline-hidden"
+      >
+        {question.prompt}
+      </h1>
 
+      {/* Phase 9C: these were `role="radio"` inside `role="radiogroup"`, which
+          promises the WAI-ARIA radiogroup keyboard contract (one tab stop,
+          arrow-key selection) that plain buttons don't implement — the widget
+          misreported itself (WCAG 4.1.2). Toggle buttons in a labelled group
+          describe what this actually is, and keep every option tabbable. */}
       {question.question_type === 'multiple_choice' && (
-        <div className="space-y-2" role="radiogroup" aria-label={question.prompt}>
+        <div className="space-y-2" role="group" aria-labelledby={promptId}>
           {(question.contents.options || []).map((option) => {
             const selected = (answer as any)?.selected_option_id === option.id
             return (
               <button
                 key={option.id}
                 type="button"
-                role="radio"
-                aria-checked={selected}
+                aria-pressed={selected}
                 onClick={() => setAnswer(question.id, { selected_option_id: option.id })}
                 className={`w-full flex items-center gap-3 rounded-md border px-4 py-3 text-start transition-colors ${
                   selected
@@ -126,8 +153,13 @@ function QuestionRunner({
         </div>
       )}
 
+      {/* Phase 9C: both answer fields were placeholder-only ("Your answer"),
+          so a screen-reader user had no way to tell which question the field
+          belonged to. Labelling them by the prompt heading ties the two
+          together without adding a visible label (WCAG 3.3.2 / 4.1.2). */}
       {question.question_type === 'short_answer' && (
         <Input
+          aria-labelledby={promptId}
           value={(answer as any)?.text || ''}
           onChange={(e) => setAnswer(question.id, { text: e.target.value })}
           placeholder={t('quiz.attempt.shortAnswerPlaceholder', { defaultValue: 'Your answer' })}
@@ -137,6 +169,7 @@ function QuestionRunner({
       {question.question_type === 'number_answer' && (
         <Input
           type="number"
+          aria-labelledby={promptId}
           value={(answer as any)?.value ?? ''}
           onChange={(e) => setAnswer(question.id, { value: e.target.valueAsNumber })}
           placeholder={t('quiz.attempt.numberAnswerPlaceholder', { defaultValue: 'Your answer' })}
@@ -194,7 +227,7 @@ function AnswerReview({ result }: { result: QuizAnswerResult }) {
         <p className="text-sm font-medium text-foreground flex-1">{question.prompt}</p>
         <Badge
           className={`shrink-0 gap-1 border-transparent ${
-            is_correct ? 'bg-success/15 text-success' : 'bg-destructive/15 text-destructive'
+            is_correct ? 'bg-success/15 text-success-strong' : 'bg-destructive/15 text-destructive'
           }`}
         >
           {is_correct ? <CheckCircle2 size={12} aria-hidden="true" /> : <XCircle size={12} aria-hidden="true" />}
@@ -283,7 +316,7 @@ function ResultsView({
         <p className="text-5xl font-bold text-foreground">{rounded}%</p>
         {outcome && (
           <Badge
-            className={`gap-1 border-transparent ${outcome === 'passed' ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}
+            className={`gap-1 border-transparent ${outcome === 'passed' ? 'bg-success/15 text-success-strong' : 'bg-warning/15 text-warning-strong'}`}
           >
             {outcome === 'passed'
               ? t('quiz.results.passed', { defaultValue: 'Passed' })

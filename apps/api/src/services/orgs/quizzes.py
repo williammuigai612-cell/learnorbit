@@ -21,6 +21,7 @@ from typing import Optional
 from uuid import uuid4
 
 from fastapi import HTTPException, Request
+from sqlalchemy import func
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -173,15 +174,16 @@ def _validate_time_limit(time_limit_minutes: Optional[int]) -> None:
 async def _question_counts(quiz_ids: list[int], db_session: AsyncSession) -> dict[int, int]:
     if not quiz_ids:
         return {}
+    # Phase 9B: aggregate in the database rather than transferring one row
+    # per attached question to count them. A quiz with no questions produces
+    # no GROUP BY row at all, so callers must keep reading this map with a
+    # default of 0 (see _to_quiz_read's `counts.get(r.id, 0)`).
     rows = (await db_session.execute(
-        select(QuizQuestion.quiz_id, QuizQuestion.question_id).where(
-            QuizQuestion.quiz_id.in_(quiz_ids)
-        )
+        select(QuizQuestion.quiz_id, func.count())
+        .where(QuizQuestion.quiz_id.in_(quiz_ids))
+        .group_by(QuizQuestion.quiz_id)
     )).all()
-    counts: dict[int, int] = {}
-    for quiz_id, _question_id in rows:
-        counts[quiz_id] = counts.get(quiz_id, 0) + 1
-    return counts
+    return {quiz_id: count for quiz_id, count in rows}
 
 
 def _to_quiz_read(quiz: Quiz, question_count: int = 0) -> QuizRead:

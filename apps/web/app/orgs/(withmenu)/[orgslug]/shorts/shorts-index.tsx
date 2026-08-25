@@ -28,13 +28,13 @@ export default function ShortsIndexClient({ orgslug }: { orgslug: string }) {
   }, [firstId, orgslug, router])
 
   if (isLoading || firstId !== undefined) {
-    return <div className="min-h-[100dvh] w-full bg-black" />
+    return <div className="min-h-[var(--org-content-viewport,100dvh)] w-full bg-black" />
   }
 
   // No published Shorts anywhere yet — the only state this page needs to
   // handle beyond "redirect to the first one" (DESIGN_SYSTEM.md §20 Empty).
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
+    <div className="flex min-h-[var(--org-content-viewport,100dvh)] items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <div className="mx-auto w-14 h-14 rounded-full bg-muted flex items-center justify-center mb-4">
           <Clapperboard className="text-muted-foreground" size={24} aria-hidden="true" />

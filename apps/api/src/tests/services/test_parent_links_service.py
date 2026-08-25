@@ -6,11 +6,13 @@ from sqlmodel import select
 
 from src.db.parent_child_links import ParentChildLink, ParentChildLinkStatusEnum
 from src.db.users import PublicUser, User
+from src.services.users.child_progress import get_child_quiz_progress
 from src.services.users.parent_links import (
     list_my_parent_links,
     list_pending_parent_links,
     request_parent_link,
     respond_to_parent_link,
+    revoke_parent_link,
 )
 
 
@@ -247,3 +249,140 @@ async def test_list_my_links_requires_authentication(db, anonymous_user):
     with pytest.raises(HTTPException) as exc:
         await list_my_parent_links(current_user=anonymous_user, db_session=db)
     assert exc.value.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Revocation (Phase 9A security review, finding F1)
+#
+# An APPROVED link grants the parent ongoing, cross-org read access to the
+# child's entire quiz history (services/users/child_progress.py). Consent that
+# cannot be withdrawn is not consent, so either party may revoke.
+# ---------------------------------------------------------------------------
+
+
+async def _approved_link(db, parent_public_user, child_user):
+    """Helper: a parent requests, the child approves. Returns the link."""
+    parent = await _make_parent(db, parent_public_user)
+    link = await request_parent_link(
+        current_user=parent, child_username=child_user.username, db_session=db
+    )
+    await respond_to_parent_link(
+        current_user=child_user, link_uuid=link.link_uuid, approve=True, db_session=db
+    )
+    return parent, link
+
+
+@pytest.mark.asyncio
+async def test_child_can_revoke_approved_link(db, admin_user, regular_user):
+    """The core consent-withdrawal path."""
+    _parent, link = await _approved_link(db, admin_user, regular_user)
+
+    revoked = await revoke_parent_link(
+        current_user=regular_user, link_uuid=link.link_uuid, db_session=db
+    )
+
+    assert revoked.status == ParentChildLinkStatusEnum.REJECTED
+
+
+@pytest.mark.asyncio
+async def test_parent_can_revoke_approved_link(db, admin_user, regular_user):
+    """Either party may end the relationship, not only the child."""
+    parent, link = await _approved_link(db, admin_user, regular_user)
+
+    revoked = await revoke_parent_link(
+        current_user=parent, link_uuid=link.link_uuid, db_session=db
+    )
+
+    assert revoked.status == ParentChildLinkStatusEnum.REJECTED
+
+
+@pytest.mark.asyncio
+async def test_revoke_rejects_unrelated_user(db, admin_user, regular_user, third_user):
+    """IDOR guard: a stranger can neither revoke the link nor learn it exists.
+    404 (not 403) matches _get_own_pending_link_or_404/_require_approved_link."""
+    _parent, link = await _approved_link(db, admin_user, regular_user)
+
+    with pytest.raises(HTTPException) as exc:
+        await revoke_parent_link(
+            current_user=third_user, link_uuid=link.link_uuid, db_session=db
+        )
+    assert exc.value.status_code == 404
+
+    row = (
+        await db.execute(
+            select(ParentChildLink).where(ParentChildLink.link_uuid == link.link_uuid)
+        )
+    ).scalars().first()
+    assert row.status == ParentChildLinkStatusEnum.APPROVED
+
+
+@pytest.mark.asyncio
+async def test_revoke_requires_authentication(db, admin_user, regular_user, anonymous_user):
+    _parent, link = await _approved_link(db, admin_user, regular_user)
+
+    with pytest.raises(HTTPException) as exc:
+        await revoke_parent_link(
+            current_user=anonymous_user, link_uuid=link.link_uuid, db_session=db
+        )
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_revoke_rejects_a_link_that_is_not_approved(db, admin_user, regular_user):
+    """A PENDING request is declined via respond_to_parent_link, not revoked —
+    revocation is specifically for withdrawing an *existing* grant."""
+    parent = await _make_parent(db, admin_user)
+    link = await request_parent_link(
+        current_user=parent, child_username=regular_user.username, db_session=db
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await revoke_parent_link(
+            current_user=regular_user, link_uuid=link.link_uuid, db_session=db
+        )
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_revoking_cuts_off_child_progress_access(db, admin_user, regular_user):
+    """The property that actually matters: revocation immediately removes the
+    parent's access to the child's cross-org quiz history."""
+    parent, link = await _approved_link(db, admin_user, regular_user)
+
+    # Access is granted while the link is APPROVED.
+    await get_child_quiz_progress(
+        request=None, child_user_id=regular_user.id, current_user=parent, db_session=db
+    )
+
+    await revoke_parent_link(
+        current_user=regular_user, link_uuid=link.link_uuid, db_session=db
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_child_quiz_progress(
+            request=None, child_user_id=regular_user.id, current_user=parent, db_session=db
+        )
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_revoked_link_requires_fresh_approval_to_be_restored(
+    db, admin_user, regular_user
+):
+    """Re-requesting after a revocation reopens as PENDING — the parent cannot
+    unilaterally restore the access the child just withdrew."""
+    parent, link = await _approved_link(db, admin_user, regular_user)
+    await revoke_parent_link(
+        current_user=regular_user, link_uuid=link.link_uuid, db_session=db
+    )
+
+    reopened = await request_parent_link(
+        current_user=parent, child_username=regular_user.username, db_session=db
+    )
+
+    assert reopened.status == ParentChildLinkStatusEnum.PENDING
+    with pytest.raises(HTTPException) as exc:
+        await get_child_quiz_progress(
+            request=None, child_user_id=regular_user.id, current_user=parent, db_session=db
+        )
+    assert exc.value.status_code == 404

@@ -82,9 +82,15 @@ export default function QuestionPickerModal({ orgId, quizId, attachedQuestionIds
       dialogContent={
         <div className="space-y-4">
           <div className="relative">
-            <Search className="absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+            {/* Phase 9C: placeholder-only search field (§22 forbids
+                placeholder-as-label); icon below the 3:1 non-text floor. */}
+            <Search
+              aria-hidden="true"
+              className="absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4"
+            />
             <input
-              type="text"
+              type="search"
+              aria-label={t('quiz.picker.search', { defaultValue: 'Search prompts' })}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('quiz.picker.search', { defaultValue: 'Search prompts' })}

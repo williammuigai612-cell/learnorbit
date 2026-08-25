@@ -8,7 +8,9 @@ import { getUriWithOrg } from '@services/config/config'
 import { fetchRAGChatSessions, RAGChatSession } from '@services/ai/ai'
 import { HeaderProfileBox } from '@components/Security/HeaderProfileBox'
 import { NotificationBell } from '@components/Objects/Menus/NotificationBell'
-import { OrgBottomTabBar } from '@components/Objects/Menus/OrgBottomTabBar'
+import { OrgBottomTabBar, MAX_TABS } from '@components/Objects/Menus/OrgBottomTabBar'
+import { useOrgMenuItems } from '@components/Objects/Menus/OrgMenuLinks'
+import { cn } from '@/lib/utils'
 import { getOrgLogoMediaDirectory } from '@services/media/media'
 import { useLHSession } from '@components/Contexts/LHSessionContext'
 import { useOrg } from '@components/Contexts/OrgContext'
@@ -83,6 +85,20 @@ export const OrgMenu = (props: any) => {
     setBubbleOpen(true)
   }
   const topOffset = isJoinBannerVisible ? JOIN_BANNER_HEIGHT : 0
+
+  // Phase 9D (M1): the bottom tab bar can only show the first MAX_TABS
+  // config-driven destinations, which stranded everything after them (Library
+  // included) with no entry point at all below lg. Derive the remainder from
+  // the same useOrgMenuItems data and the same MAX_TABS split the bar uses,
+  // rather than keeping a second hardcoded list here.
+  const orgMenuItems = useOrgMenuItems(orgslug)
+  const tabBarKeys = new Set(
+    orgMenuItems
+      .filter((i) => !i.external)
+      .slice(0, MAX_TABS)
+      .map((i) => i.key)
+  )
+  const overflowMenuItems = orgMenuItems.filter((i) => !tabBarKeys.has(i.key))
 
   // Get primary color from org config (v2: customization.general.color, v1: general.color)
   const config = org?.config?.config
@@ -383,8 +399,14 @@ export const OrgMenu = (props: any) => {
           </div>
         </div>
       </nav>
+      {/* Phase 9D (M2): was `md:hidden`, but the "More" button that opens this
+          panel lives in the `lg:hidden` bottom tab bar — so between 768px and
+          1023px tapping More opened a panel that was itself display:none.
+          `inert` keeps the off-screen contents out of the tab order while the
+          panel is closed. */}
       <div
-        className={`fixed inset-x-0 bg-background/95 backdrop-blur-lg md:hidden shadow-lg transition-all duration-300 ease-in-out ${
+        inert={!isMenuOpen}
+        className={`fixed inset-x-0 bg-background/95 backdrop-blur-lg lg:hidden shadow-lg transition-all duration-300 ease-in-out ${
           isMenuOpen ? 'opacity-100' : '-top-full opacity-0'
         }`}
         style={{
@@ -392,20 +414,66 @@ export const OrgMenu = (props: any) => {
           top: isMenuOpen ? topOffset + 60 : undefined
         }}
       >
-        {/* Primary destinations live in the bottom tab bar below (§14: "not a
-            hamburger drawer duplicating the tab bar") — this panel only
-            surfaces what the tab bar can't: search and account. */}
         <div className="flex flex-col px-4 py-3 space-y-4 justify-center items-center">
-          {/* Mobile Search */}
-          <div className="w-full px-2">
+          {/* Search/notifications/account are only missing from the header
+              below md — from md up the header shows them itself. */}
+          <div className="w-full px-2 md:hidden">
             <SearchBar orgslug={orgslug} isMobile={true} />
           </div>
-          <AuthenticatedClientElement checkMethod="authentication">
-            <NotificationBell orgslug={orgslug} />
-          </AuthenticatedClientElement>
-          <div className="border-t border-border">
+          <div className="md:hidden">
+            <AuthenticatedClientElement checkMethod="authentication">
+              <NotificationBell orgslug={orgslug} />
+            </AuthenticatedClientElement>
+          </div>
+          <div className="border-t border-border md:hidden">
             <HeaderProfileBox />
           </div>
+          {/* The destinations the tab bar had no room for (§14: "More" holds
+              the overflow, it is not a drawer duplicating the tab bar). */}
+          {overflowMenuItems.length > 0 && (
+            <nav
+              aria-label={t('a11y.moreDestinations', { defaultValue: 'More destinations' })}
+              className="flex w-full flex-col gap-1 border-t border-border pt-3"
+            >
+              {overflowMenuItems.map((item) => {
+                const isActive =
+                  !item.external &&
+                  pathname != null &&
+                  (pathname === item.href || pathname.startsWith(`${item.href}/`))
+                const content = (
+                  <span
+                    className={cn(
+                      'flex items-center gap-3 rounded-md px-3 py-2 min-h-11 text-sm font-semibold transition-colors',
+                      isActive ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
+                    )}
+                  >
+                    <item.Icon size={22} weight={isActive ? 'fill' : 'regular'} aria-hidden="true" />
+                    <span className="truncate">{item.label}</span>
+                  </span>
+                )
+                return item.external ? (
+                  <a
+                    key={item.key}
+                    href={item.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    {content}
+                  </a>
+                ) : (
+                  <Link
+                    key={item.key}
+                    href={item.href}
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    {content}
+                  </Link>
+                )
+              })}
+            </nav>
+          )}
         </div>
       </div>
 

@@ -291,17 +291,27 @@ export interface ChannelVideoComment {
   author: ChannelVideoCommentAuthor | null
 }
 
+/** Comments shown while the panel is still closed — enough to render the
+ * count badge on the trigger without pulling a full page of bodies and
+ * author objects (Phase 9B). */
+export const CHANNEL_VIDEO_COMMENTS_PREVIEW_LIMIT = 20
+
+/** Comments fetched once the panel is actually opened. Still a single
+ * generous fetch with no pagination UI, matching the existing community
+ * CommentSection precedent (getComments(uuid, 1, 100, ...)) — 9B bounded the
+ * *closed* case, it did not add paging to the panel itself. */
+export const CHANNEL_VIDEO_COMMENTS_LIMIT = 100
+
 /** Newest-first comments (Phase 4C). Supports anonymous viewers of a public
- * video — same visibility rule as getChannelVideo. No pagination UI on the
- * frontend: fetched once with a generous limit, matching the existing
- * community CommentSection precedent (getComments(uuid, 1, 100, ...)). */
+ * video — same visibility rule as getChannelVideo. */
 export async function listChannelVideoComments(
   org_id: number,
   channelvideo_id: number | string,
-  access_token?: string
+  access_token?: string,
+  limit: number = CHANNEL_VIDEO_COMMENTS_LIMIT
 ): Promise<ChannelVideoComment[]> {
   const result = await fetch(
-    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/comments?page=1&limit=100`,
+    `${getAPIUrl()}orgs/${org_id}/videos/${channelvideo_id}/comments?page=1&limit=${limit}`,
     RequestBodyWithAuthHeader('GET', null, null, access_token)
   )
   return errorHandling(result)

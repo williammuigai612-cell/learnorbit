@@ -189,6 +189,8 @@ async def list_questions(
     level: Optional[str] = None,
     institution_context: Optional[str] = None,
     published: Optional[bool] = None,
+    page: int = 1,
+    limit: int = 50,
 ) -> list[QuestionRead]:
     org = await _get_org_or_404(org_id, db_session)
     # Admin-only listing — see module docstring for why this differs from
@@ -209,6 +211,11 @@ async def list_questions(
 
     # Newest-first — same convention as list_channel_resources.
     statement = statement.order_by(Question.creation_date.desc())
+
+    # Paginated in Phase 9B. Applied last, so the window always slices the
+    # *filtered* set — filters narrow first, then the page is taken. The
+    # admin gate above runs before any of this.
+    statement = statement.offset((page - 1) * limit).limit(limit)
 
     rows = (await db_session.execute(statement)).scalars().all()
     return [QuestionRead.model_validate(r) for r in rows]

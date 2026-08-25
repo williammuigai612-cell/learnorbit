@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.core.events.database import get_db_session
@@ -20,7 +20,8 @@ router = APIRouter()
         "Cross-organization, reverse-chronological feed of every published, "
         "publicly-visible Short. Anonymous access. Drafts and "
         "unlisted/private Shorts are never returned — the same "
-        "published+public predicate used by GET /orgs/{org_id}/videos."
+        "published+public predicate used by GET /orgs/{org_id}/videos. "
+        "Paginated newest-first; maximum 100 per page."
     ),
     responses={
         200: {
@@ -30,6 +31,8 @@ router = APIRouter()
     },
 )
 async def api_list_public_shorts(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=50, ge=1, le=100, description="Items per page (max 100)"),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> List[ChannelVideoRead]:
-    return await list_public_shorts(db_session)
+    return await list_public_shorts(db_session, page, limit)

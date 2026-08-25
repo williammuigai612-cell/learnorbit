@@ -37,7 +37,7 @@ interface ShortViewerClientProps {
 // the shared player.
 function ShortPlayerSkeleton() {
   return (
-    <div className="short-viewer-frame relative aspect-[9/16] h-[min(100dvh,calc(100vw*16/9))] w-auto max-w-full overflow-hidden bg-zinc-900 animate-pulse sm:h-[min(80dvh,calc(100vw*16/9))] sm:rounded-lg">
+    <div className="short-viewer-frame relative aspect-[9/16] h-[min(var(--org-content-viewport,100dvh),calc(100vw*16/9))] w-auto max-w-full overflow-hidden bg-zinc-900 animate-pulse sm:h-[min(80dvh,calc(100vw*16/9))] sm:rounded-lg">
       <div className="absolute inset-0 flex items-center justify-center">
         <div className="w-16 h-16 rounded-full bg-white/10" />
       </div>
@@ -80,7 +80,7 @@ function ShortUnavailableState({
           })
 
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4 sm:min-h-0 sm:py-24">
+    <div className="flex min-h-[var(--org-content-viewport,100dvh)] items-center justify-center bg-background px-4 sm:min-h-0 sm:py-24">
       <div className="max-w-md text-center">
         <div className="mx-auto w-14 h-14 rounded-full bg-muted flex items-center justify-center mb-4">
           <Icon className="text-muted-foreground" size={24} aria-hidden="true" />
@@ -266,6 +266,13 @@ function ShortViewerContent({ orgslug, channelvideoid }: ShortViewerClientProps)
       const target = e.target as HTMLElement | null
       if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
       if (target?.isContentEditable) return
+      // Phase 9C: the form-field guard above misses Radix overlays — a menu
+      // item or dialog is none of those tag names, so with the comments
+      // dialog, the report dialog or the comment-actions menu open, an arrow
+      // key both moved menu focus *and* navigated the page out from under it
+      // (WCAG 2.1.1). Any open overlay owns its own arrow keys.
+      if (target?.closest('[role="menu"], [role="dialog"], [role="listbox"]')) return
+      if (document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"]')) return
       if (e.key === 'ArrowUp' && prevId !== undefined) {
         e.preventDefault()
         goTo(prevId)
@@ -317,7 +324,7 @@ function ShortViewerContent({ orgslug, channelvideoid }: ShortViewerClientProps)
     // skeleton instead of a jarring error flash while it resolves.
     if (canAutoSkip) {
       return (
-        <div className="flex min-h-[100dvh] w-full items-center justify-center bg-black sm:min-h-0 sm:py-10">
+        <div className="flex min-h-[var(--org-content-viewport,100dvh)] w-full items-center justify-center bg-black sm:min-h-0 sm:py-10">
           <ShortPlayerSkeleton />
         </div>
       )
@@ -327,7 +334,7 @@ function ShortViewerContent({ orgslug, channelvideoid }: ShortViewerClientProps)
 
   if (!slideReady) {
     return (
-      <div className="flex min-h-[100dvh] w-full items-center justify-center bg-black sm:min-h-0 sm:py-10">
+      <div className="flex min-h-[var(--org-content-viewport,100dvh)] w-full items-center justify-center bg-black sm:min-h-0 sm:py-10">
         <ShortPlayerSkeleton />
       </div>
     )
@@ -343,7 +350,7 @@ function ShortViewerContent({ orgslug, channelvideoid }: ShortViewerClientProps)
   }
 
   return (
-    <div className="relative flex min-h-[100dvh] w-full flex-col items-center justify-center gap-3 bg-black sm:min-h-0 sm:flex-row sm:gap-4 sm:py-10">
+    <div className="relative flex min-h-[var(--org-content-viewport,100dvh)] w-full flex-col items-center justify-center gap-3 bg-black sm:min-h-0 sm:flex-row sm:gap-4 sm:py-10">
       <Link
         href={getUriWithOrg(orgslug, '/')}
         className="absolute start-3 top-3 z-20 inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm hover:bg-black/60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -360,14 +367,14 @@ function ShortViewerContent({ orgslug, channelvideoid }: ShortViewerClientProps)
           player rather than an overlaid swipe affordance. */}
       <div
         ref={scrollerRef}
-        className="relative h-[100dvh] w-full snap-y snap-mandatory overflow-y-scroll sm:h-auto sm:w-auto sm:snap-none sm:overflow-visible"
+        className="relative h-[var(--org-content-viewport,100dvh)] w-full snap-y snap-mandatory overflow-y-scroll sm:h-auto sm:w-auto sm:snap-none sm:overflow-visible"
       >
         {prevId !== undefined && (
-          <div ref={prevSpacerRef} aria-hidden="true" className="h-[100dvh] w-full snap-start sm:hidden" />
+          <div ref={prevSpacerRef} aria-hidden="true" className="h-[var(--org-content-viewport,100dvh)] w-full snap-start sm:hidden" />
         )}
 
-        <div ref={slideRef} className="flex h-[100dvh] w-full snap-start items-center justify-center sm:h-auto">
-          <div className="short-viewer-frame relative aspect-[9/16] h-[min(100dvh,calc(100vw*16/9))] w-auto max-w-full overflow-hidden bg-zinc-950 sm:h-[min(80dvh,calc(100vw*16/9))] sm:rounded-lg sm:ring-1 sm:ring-white/10">
+        <div ref={slideRef} className="flex h-[var(--org-content-viewport,100dvh)] w-full snap-start items-center justify-center sm:h-auto">
+          <div className="short-viewer-frame relative aspect-[9/16] h-[min(var(--org-content-viewport,100dvh),calc(100vw*16/9))] w-auto max-w-full overflow-hidden bg-zinc-950 sm:h-[min(80dvh,calc(100vw*16/9))] sm:rounded-lg sm:ring-1 sm:ring-white/10">
             <div className="short-video-fill">
               {activity.activity_type === 'TYPE_VIDEO' ? (
                 <Suspense fallback={<ShortPlayerSkeleton />}>
@@ -404,7 +411,7 @@ function ShortViewerContent({ orgslug, channelvideoid }: ShortViewerClientProps)
         </div>
 
         {nextId !== undefined && (
-          <div ref={nextSpacerRef} aria-hidden="true" className="h-[100dvh] w-full snap-start sm:hidden" />
+          <div ref={nextSpacerRef} aria-hidden="true" className="h-[var(--org-content-viewport,100dvh)] w-full snap-start sm:hidden" />
         )}
       </div>
 

@@ -71,7 +71,7 @@ function ProgressRow({ summary, orgslug }: { summary: QuizProgressSummary; orgsl
         )}
         {outcome && (
           <Badge
-            className={`gap-1 border-transparent ${outcome === 'passed' ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}
+            className={`gap-1 border-transparent ${outcome === 'passed' ? 'bg-success/15 text-success-strong' : 'bg-warning/15 text-warning-strong'}`}
           >
             {outcome === 'passed' ? <CheckCircle2 size={12} aria-hidden="true" /> : <XCircle size={12} aria-hidden="true" />}
             {outcome === 'passed'

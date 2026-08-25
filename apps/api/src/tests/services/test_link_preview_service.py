@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -166,7 +167,10 @@ async def test_fetch_link_preview_blocks_redirect_url_validation_errors():
             await fetch_link_preview("https://example.com/page")
 
     assert exc_info.value.status_code == 400
-    assert "blocked redirect URL" in exc_info.value.detail
+    # SECURITY: the guard reason stays server-side; the caller gets the
+    # generic message only.
+    assert exc_info.value.detail == link_preview._BLOCKED_URL_DETAIL
+    assert "blocked redirect URL" not in exc_info.value.detail
     assert handler.requested_urls == ["https://example.com/page"]
     mock_peer_allowed.assert_called_once()
 
@@ -207,7 +211,8 @@ async def test_fetch_link_preview_blocks_invalid_url_before_request():
             await fetch_link_preview("http://localhost/page")
 
     assert exc_info.value.status_code == 400
-    assert "Blocked hostname" in exc_info.value.detail
+    assert exc_info.value.detail == link_preview._BLOCKED_URL_DETAIL
+    assert "localhost" not in exc_info.value.detail
     # The client is opened, but the guard runs before the first hop is sent.
     assert handler.requested_urls == []
 
@@ -227,7 +232,8 @@ async def test_fetch_link_preview_blocks_peer_validation_errors():
             await fetch_link_preview("https://example.com/page")
 
     assert exc_info.value.status_code == 400
-    assert "DNS rebinding detected" in exc_info.value.detail
+    assert exc_info.value.detail == link_preview._BLOCKED_URL_DETAIL
+    assert "rebinding" not in exc_info.value.detail.lower()
 
 
 @pytest.mark.asyncio
@@ -281,7 +287,8 @@ async def test_fetch_link_preview_blocks_redirect_peer_validation_and_fallback_f
             await fetch_link_preview("https://example.com/page")
 
     assert exc_info.value.status_code == 400
-    assert "blocked redirect peer" in exc_info.value.detail
+    assert exc_info.value.detail == link_preview._BLOCKED_URL_DETAIL
+    assert "peer" not in exc_info.value.detail.lower()
     assert handler.requested_urls == ["https://example.com/page", redirect_url]
 
 
@@ -557,3 +564,119 @@ async def test_fetch_link_preview_stops_after_the_redirect_budget():
 
     assert result == _MINIMAL_PREVIEW
     assert len(handler.requested_urls) == hops
+
+
+# ── SSRF detail must never reach the client ──────────────────────────────
+# SECURITY_REVIEW.md §19 / §54.15. The guard's exception text names the
+# internal detail that caused the block — the private address a hostname
+# resolved to, the peer set a rebinding attempt was measured against. It used
+# to be returned verbatim as the 400's `detail`, which made this endpoint an
+# internal-network oracle: aim it at a host and read the topology out of the
+# error. These tests assert on the *absence* of that data, so they fail if
+# anyone reinstates `detail=str(exc)`.
+
+# Verbatim messages from ssrf_guard.py, carrying exactly the internal facts
+# that must not escape.
+_LEAKY_RESOLVE_MESSAGE = (
+    "URL http://internal.example.com/ resolves to blocked address range (10.1.2.3)"
+)
+_LEAKY_PEER_MESSAGE = (
+    "DNS rebinding detected: connected to 192.168.7.7, "
+    "validated addresses were ['93.184.216.34']"
+)
+
+# Every internal token that appears in the two messages above.
+_INTERNAL_TOKENS = [
+    "10.1.2.3",
+    "192.168.7.7",
+    "93.184.216.34",
+    "blocked address range",
+    "rebinding",
+    "validated addresses",
+    "internal.example.com",
+]
+
+
+def _assert_no_internal_detail(detail):
+    assert detail == link_preview._BLOCKED_URL_DETAIL
+    lowered = str(detail).lower()
+    for token in _INTERNAL_TOKENS:
+        assert token.lower() not in lowered, f"leaked {token!r} to the client"
+
+
+@pytest.mark.asyncio
+async def test_resolve_block_does_not_leak_internal_address_to_client(caplog):
+    """A hostname resolving into a private range must not tell the caller
+    *which* private address it was — while the server log still records it."""
+    handler = _Handler([_html_response("<html><head><title>Nope</title></head></html>")])
+
+    with caplog.at_level(logging.WARNING, logger="src.services.utils.link_preview"):
+        with patch(
+            "src.services.utils.link_preview.resolve_and_validate_url",
+            side_effect=SSRFBlockedError(_LEAKY_RESOLVE_MESSAGE),
+        ), _patch_client(handler):
+            with pytest.raises(HTTPException) as exc_info:
+                await fetch_link_preview("http://internal.example.com/")
+
+    assert exc_info.value.status_code == 400
+    _assert_no_internal_detail(exc_info.value.detail)
+    # Diagnostics preserved server-side.
+    assert _LEAKY_RESOLVE_MESSAGE in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_peer_block_does_not_leak_validated_address_set_to_client(caplog):
+    """Rebinding detection must not hand back the peer it connected to, nor
+    the validated set it was compared against."""
+    handler = _Handler([_html_response("<html><head><title>Nope</title></head></html>")])
+
+    with caplog.at_level(logging.WARNING, logger="src.services.utils.link_preview"):
+        with patch(
+            "src.services.utils.link_preview.resolve_and_validate_url",
+            return_value={_PEER_IP},
+        ), patch(
+            "src.services.utils.link_preview.assert_connected_peer_allowed",
+            side_effect=SSRFBlockedError(_LEAKY_PEER_MESSAGE),
+        ), _patch_client(handler):
+            with pytest.raises(HTTPException) as exc_info:
+                await fetch_link_preview("https://example.com/page")
+
+    assert exc_info.value.status_code == 400
+    _assert_no_internal_detail(exc_info.value.detail)
+    assert _LEAKY_PEER_MESSAGE in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "guard_message",
+    [
+        "URL scheme not allowed: 'file'",
+        "Blocked hostname: metadata.google.internal",
+        "URL http://x/ resolves to blocked address range (169.254.169.254)",
+        "DNS rebinding detected: connected to 127.0.0.1, validated addresses were ['8.8.8.8']",
+    ],
+)
+async def test_every_block_reason_returns_the_same_indistinguishable_message(guard_message):
+    """The four block reasons must be indistinguishable from each other. A
+    per-reason message would leak the same topology, just more slowly — an
+    attacker could still tell "blocked because private range" from "blocked
+    because bad scheme" and walk the network that way."""
+    handler = _Handler([_html_response("<html><head><title>Nope</title></head></html>")])
+
+    with patch(
+        "src.services.utils.link_preview.resolve_and_validate_url",
+        side_effect=SSRFBlockedError(guard_message),
+    ), _patch_client(handler):
+        with pytest.raises(HTTPException) as exc_info:
+            await fetch_link_preview("http://example.com/page")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == link_preview._BLOCKED_URL_DETAIL
+
+
+def test_blocked_url_detail_carries_no_network_vocabulary():
+    """Guards the constant itself: the generic message must stay generic if
+    someone later makes it more 'helpful'."""
+    lowered = link_preview._BLOCKED_URL_DETAIL.lower()
+    for token in ("ip", "address", "resolve", "dns", "private", "internal", "localhost", "peer"):
+        assert token not in lowered

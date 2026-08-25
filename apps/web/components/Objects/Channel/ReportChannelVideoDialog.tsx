@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Flag } from 'lucide-react'
+import { AlertCircle, Flag } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useReportChannelVideo } from '@/hooks/queries/useChannelVideoEngagement'
 import type { ChannelVideoReportReason } from '@services/organizations/channelVideos'
@@ -111,7 +111,12 @@ export function ReportChannelVideoDialog({ orgId, channelVideoId, variant = 'def
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="p-6">
+      {/* Phase 9D (M6): same per-dialog sizing as the comments panel — inset
+          from the viewport edges below sm, and capped in dvh so the reason
+          select and the details textarea stay reachable with the on-screen
+          keyboard up. `overflow-y-auto` because, unlike the comments panel,
+          this dialog has no inner scroll area of its own. */}
+      <DialogContent className="w-[95vw] sm:w-full max-h-[85dvh] overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{t('video.report.title', { defaultValue: 'Report this video' })}</DialogTitle>
           <DialogDescription>
@@ -144,13 +149,39 @@ export function ReportChannelVideoDialog({ orgId, channelVideoId, variant = 'def
             </Label>
             <Textarea
               id="report-details"
+              aria-describedby="report-details-count"
+              aria-invalid={detailsOverLimit || undefined}
               value={details}
               onChange={(e) => setDetails(e.target.value)}
               rows={3}
               placeholder={t('video.report.detailsPlaceholder', { defaultValue: 'Anything else we should know?' })}
             />
-            <span className={`text-xs ${detailsOverLimit ? 'text-red-600' : 'text-muted-foreground'}`}>
-              {MAX_DETAILS_LENGTH - details.length}
+            {/* Phase 9C: same counter treatment as ChannelVideoCommentsPanel —
+                associated with the field, and over-limit pairs color with an
+                icon + wording rather than relying on color alone (§22). */}
+            <span
+              id="report-details-count"
+              className={`text-xs ${detailsOverLimit ? 'inline-flex items-center gap-1 font-semibold text-destructive' : 'text-muted-foreground'}`}
+            >
+              {detailsOverLimit ? (
+                <>
+                  <AlertCircle size={12} aria-hidden="true" />
+                  {t('video.report.overLimit', {
+                    defaultValue: '{{count}} over the limit',
+                    count: details.length - MAX_DETAILS_LENGTH,
+                  })}
+                </>
+              ) : (
+                <>
+                  <span aria-hidden="true">{MAX_DETAILS_LENGTH - details.length}</span>
+                  <span className="sr-only">
+                    {t('video.report.charactersRemaining', {
+                      defaultValue: '{{count}} characters remaining',
+                      count: MAX_DETAILS_LENGTH - details.length,
+                    })}
+                  </span>
+                </>
+              )}
             </span>
           </div>
         </div>

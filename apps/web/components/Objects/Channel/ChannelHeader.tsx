@@ -111,7 +111,7 @@ export default function ChannelHeader({ org }: ChannelHeaderProps) {
         </div>
         {about && <p className="text-sm text-gray-500 max-w-2xl">{about}</p>}
         {ownerName && (
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-muted-foreground">
             {t('channel.createdBy', { defaultValue: 'Created by' })} {ownerName}
           </p>
         )}

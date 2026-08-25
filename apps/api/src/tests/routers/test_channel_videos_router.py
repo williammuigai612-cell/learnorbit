@@ -99,3 +99,34 @@ async def test_content_format_omitted_preserves_existing_behavior(db, org, admin
 async def test_content_format_invalid_value_is_rejected(db, org, client):
     resp = await client.get(f"/api/v1/orgs/{org.id}/videos", params={"content_format": "bogus"})
     assert resp.status_code == 422
+
+
+# ── Comment-list pagination bounds (Phase 9 re-verification) ───────────────
+# SECURITY_REVIEW.md §39 "Pagination and Resource Enumeration" requires a
+# maximum page size. GET /orgs/{org_id}/videos/{id}/comments previously took
+# an uncapped `limit`; it now uses the same cap/convention as GET /feed and
+# GET /shorts (Phase 9B-1).
+
+@pytest.mark.asyncio
+async def test_comment_list_rejects_out_of_range_pagination_params(
+    db, org, admin_user, course, client
+):
+    video = await _published_video(db, org, admin_user, course, "cmtpage", content_format="long")
+
+    for query in ("?limit=101", "?limit=0", "?page=0", "?limit=100000"):
+        resp = await client.get(
+            f"/api/v1/orgs/{org.id}/videos/{video.id}/comments{query}"
+        )
+        assert resp.status_code == 422, query
+
+
+@pytest.mark.asyncio
+async def test_comment_list_accepts_in_range_pagination_params(
+    db, org, admin_user, course, client
+):
+    video = await _published_video(db, org, admin_user, course, "cmtpage2", content_format="long")
+
+    resp = await client.get(
+        f"/api/v1/orgs/{org.id}/videos/{video.id}/comments?page=1&limit=100"
+    )
+    assert resp.status_code == 200

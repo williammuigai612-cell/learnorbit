@@ -1,11 +1,17 @@
 'use client';
-import { useEffect, type ReactNode } from "react";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 import Watermark from '@components/Objects/Watermark'
 import { SessionGate } from '@components/Contexts/LHSessionContext'
 import { OrgMenu } from '@components/Objects/Menus/OrgMenu'
-import { OrgSidebar } from '@components/Objects/Menus/OrgSidebar'
+import { OrgSidebar, HEADER_HEIGHT } from '@components/Objects/Menus/OrgSidebar'
+import { BOTTOM_TAB_BAR_HEIGHT } from '@components/Objects/Menus/OrgBottomTabBar'
 import { useOrg } from '@components/Contexts/OrgContext'
-import { OrgJoinBanner, OrgJoinBannerProvider } from '@components/Objects/Banners/OrgJoinBanner'
+import {
+  OrgJoinBanner,
+  OrgJoinBannerProvider,
+  useJoinBannerVisible,
+  JOIN_BANNER_HEIGHT,
+} from '@components/Objects/Banners/OrgJoinBanner'
 import { OrgMFAPolicyGate } from '@components/Objects/Banners/OrgMFAPolicyGate'
 import { PodcastPlayerProvider } from '@components/Contexts/PodcastPlayerContext'
 import dynamic from 'next/dynamic'
@@ -14,6 +20,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { PageViewTracker } from '@components/Analytics/PageViewTracker'
 import { usePathname, useSearchParams } from 'next/navigation'
+import { useTranslation } from 'react-i18next'
 import { usePlan } from '@components/Hooks/usePlan'
 import { getGoogleFontUrl, DEFAULT_FONT } from '@/lib/fonts'
 
@@ -62,6 +69,7 @@ function OrgFooter() {
 }
 
 function LayoutContent({ children, orgslug }: { children: ReactNode; orgslug: string }) {
+  const { t } = useTranslation()
   const org = useOrg() as any
   const primaryColor = org?.config?.config?.customization?.general?.color || org?.config?.config?.general?.color || ''
   const customFont = org?.config?.config?.customization?.general?.font || org?.config?.config?.general?.font || ''
@@ -108,8 +116,19 @@ function LayoutContent({ children, orgslug }: { children: ReactNode; orgslug: st
   const pathParts = pathname?.split('/').filter(Boolean) || []
 
   // Pages that use a full-bleed layout (no footer/watermark)
-  const noFooterPaths = ['copilot']
+  const noFooterPaths = ['copilot', 'shorts']
   const isFullBleedPage = noFooterPaths.some((p) => pathParts.includes(p))
+
+  // Phase 9D (M3): Shorts is the one route that owns the whole visible viewport
+  // on mobile (docs/DESIGN_SYSTEM.md §16). Everywhere else the bottom padding
+  // clears the fixed tab bar, but here it would push the one-viewport-tall slide
+  // below the fold and make the page scroll behind the chrome. Instead the
+  // route drops the padding and sizes itself against --org-content-viewport —
+  // the height actually left between the fixed chrome above and below.
+  const isFullViewportPage = pathParts.includes('shorts')
+  const { isVisible: isJoinBannerVisible } = useJoinBannerVisible()
+  const chromeHeight =
+    (isJoinBannerVisible ? JOIN_BANNER_HEIGHT : 0) + HEADER_HEIGHT + BOTTOM_TAB_BAR_HEIGHT
 
   return (
     <div
@@ -124,18 +143,53 @@ function LayoutContent({ children, orgslug }: { children: ReactNode; orgslug: st
       }}
     >
       <PageViewTracker />
+      {/* Phase 9C: the only bypass mechanism past the top nav + sidebar (~12
+          links) that precede content on every org page. Hidden until focused,
+          so it costs nothing visually. */}
+      {!chromeless && (
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-4 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          style={{ zIndex: 'var(--z-nav)' }}
+        >
+          {t('a11y.skipToContent', { defaultValue: 'Skip to main content' })}
+        </a>
+      )}
       {!chromeless && <OrgJoinBanner />}
       {!chromeless && <OrgMenu orgslug={orgslug} />}
       {/* Org-wide 2FA policy: renders nothing unless this user is non-compliant. */}
       {!chromeless && <OrgMFAPolicyGate />}
       {/* Desktop (>= lg) primary nav; mobile/tablet use OrgMenu's bottom tab bar */}
       {!chromeless && <OrgSidebar orgslug={orgslug} />}
-      <div
-        className={`flex-1 relative ${!chromeless ? 'lg:ps-60 pb-16 lg:pb-0' : ''}`}
-        style={{ zIndex: 'var(--z-content)' }}
+      {/* Phase 9C: the page's `main` landmark and the skip link's target.
+          Was a plain div, which left every org page without a main landmark
+          (docs/DESIGN_SYSTEM.md §22, WCAG 2.4.1). `tabIndex={-1}` makes the
+          skip link's jump actually move focus, not just the scroll position. */}
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className={`flex-1 relative focus:outline-hidden ${
+          // Phase 9D (M8): the tab bar adds env(safe-area-inset-bottom) to its
+          // own padding, but <main> cleared only the bar's 4rem — so on a
+          // notched device the last row of content sat under the home
+          // indicator. `lg:pb-0` still drops all of it once the sidebar takes
+          // over, so desktop gains no stray spacing.
+          !chromeless
+            ? `lg:ps-60 ${isFullViewportPage ? '' : 'pb-[calc(4rem_+_env(safe-area-inset-bottom))] lg:pb-0'}`
+            : ''
+        }`}
+        style={
+          {
+            zIndex: 'var(--z-content)',
+            // A custom property rather than an inline height: an inline style
+            // would beat the `sm:`-prefixed overrides the Shorts viewer uses to
+            // fall back to its centred desktop layout.
+            '--org-content-viewport': `calc(100dvh - ${chromeHeight}px - env(safe-area-inset-bottom))`,
+          } as CSSProperties
+        }
       >
         {children}
-      </div>
+      </main>
       {!isFullBleedPage && !chromeless && (
         <div className="lg:ps-60">
           <OrgFooter />

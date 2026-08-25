@@ -1,6 +1,6 @@
 from typing import List, Union
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.core.events.database import get_db_session
@@ -31,8 +31,8 @@ router = APIRouter()
     },
 )
 async def api_list_notifications(
-    page: int = 1,
-    limit: int = 50,
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=50, ge=1, le=100, description="Items per page (max 100)"),
     current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> List[NotificationRead]:

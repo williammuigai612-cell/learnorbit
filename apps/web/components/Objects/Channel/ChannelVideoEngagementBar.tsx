@@ -88,8 +88,12 @@ function RailItem({
           {icon}
         </Button>
       ) : (
-        <span className={iconWrapperClass} aria-label={label}>
+        // Phase 9C: `aria-label` on a bare <span> is not exposed — a <span>
+        // has no role that supports naming, so signed-out viewers heard a
+        // naked number (or nothing). Visually-hidden text always is.
+        <span className={iconWrapperClass}>
           {icon}
+          <span className="sr-only">{label}</span>
         </span>
       )}
       {count !== undefined && (
@@ -105,8 +109,8 @@ function RailItem({
 // Button trigger.
 const RailCommentTrigger = React.forwardRef<
   HTMLButtonElement,
-  { commentCount: number | undefined; isLoading: boolean; label: string } & React.ButtonHTMLAttributes<HTMLButtonElement>
->(({ commentCount, isLoading, label, ...props }, ref) => {
+  { commentCountLabel: string | undefined; isLoading: boolean; label: string } & React.ButtonHTMLAttributes<HTMLButtonElement>
+>(({ commentCountLabel, isLoading, label, ...props }, ref) => {
   if (isLoading) return <RailSkeleton />
   return (
     <div className="flex flex-col items-center gap-1">
@@ -121,8 +125,8 @@ const RailCommentTrigger = React.forwardRef<
       >
         <MessageCircle size={20} aria-hidden="true" />
       </Button>
-      {commentCount !== undefined && (
-        <span className="text-xs font-medium text-white drop-shadow-sm">{commentCount}</span>
+      {commentCountLabel !== undefined && (
+        <span className="text-xs font-medium text-white drop-shadow-sm">{commentCountLabel}</span>
       )}
     </div>
   )
@@ -231,9 +235,9 @@ export function ChannelVideoEngagementBar({
         <ChannelVideoCommentsPanel
           orgId={orgId}
           channelVideoId={channelVideoId}
-          trigger={({ commentCount, isLoading: commentsLoading }) => (
+          trigger={({ commentCountLabel, isLoading: commentsLoading }) => (
             <RailCommentTrigger
-              commentCount={commentCount}
+              commentCountLabel={commentCountLabel}
               isLoading={commentsLoading}
               label={t('video.comments.open', { defaultValue: 'View comments' })}
             />
@@ -290,7 +294,7 @@ export function ChannelVideoEngagementBar({
   }
 
   return (
-    <div className="flex items-center gap-2" role="group" aria-label={t('video.engagement', { defaultValue: 'Video engagement' })}>
+    <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('video.engagement', { defaultValue: 'Video engagement' })}>
       {isLoading || likeCount === undefined ? (
         <LikeSkeleton />
       ) : isAuthenticated ? (
@@ -312,12 +316,12 @@ export function ChannelVideoEngagementBar({
           <span className={isLiked ? 'text-primary' : 'text-muted-foreground'}>{likeCount}</span>
         </Button>
       ) : (
-        <span
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground"
-          aria-label={t('video.likeCount', { count: likeCount, defaultValue: '{{count}} likes' })}
-        >
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground">
           <Heart size={16} aria-hidden="true" />
-          {likeCount}
+          <span aria-hidden="true">{likeCount}</span>
+          <span className="sr-only">
+            {t('video.likeCount', { count: likeCount, defaultValue: '{{count}} likes' })}
+          </span>
         </span>
       )}
 
@@ -363,12 +367,12 @@ export function ChannelVideoEngagementBar({
           <span className="text-muted-foreground">{shareCount}</span>
         </Button>
       ) : (
-        <span
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground"
-          aria-label={t('video.shareCount', { count: shareCount, defaultValue: '{{count}} shares' })}
-        >
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground">
           <Share2 size={16} aria-hidden="true" />
-          {shareCount}
+          <span aria-hidden="true">{shareCount}</span>
+          <span className="sr-only">
+            {t('video.shareCount', { count: shareCount, defaultValue: '{{count}} shares' })}
+          </span>
         </span>
       )}
 

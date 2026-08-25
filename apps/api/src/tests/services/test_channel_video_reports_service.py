@@ -496,3 +496,139 @@ async def test_resolve_report_rejects_anonymous(db, org, anonymous_user, admin_u
 
 def test_allowed_statuses_are_a_fixed_set():
     assert ALLOWED_REPORT_STATUSES == {"RESOLVED", "DISMISSED"}
+
+
+# ── Pagination (Phase 9B) ───────────────────────────────────────────────────
+# 9B-1: the moderation queue was unpaginated, which 9A finding F2 named as the
+# concrete impact of the (still deferred) missing rate limit on reporting.
+# Rows are inserted directly here because the (channelvideo_id, reporter_id)
+# unique constraint deliberately caps one report per user per video, and these
+# tests need many rows with deterministic ordering.
+
+
+async def _reports_newest_first(db, org, published_video, count):
+    made = []
+    for i in range(count):
+        r = ChannelVideoReport(
+            report_uuid=f"channelvideoreport_pg{i}",
+            channelvideo_id=published_video.id,
+            reporter_id=1000 + i,
+            org_id=org.id,
+            reason="SPAM",
+            details=None,
+            status="OPEN",
+            creation_date=f"2026-04-{i + 1:02d} 00:00:00.000000",
+        )
+        db.add(r)
+        made.append(r)
+    await db.commit()
+    return list(reversed(made))
+
+
+@pytest.mark.asyncio
+async def test_list_reports_respects_limit(db, org, admin_user, published_video):
+    newest_first = await _reports_newest_first(db, org, published_video, 5)
+    reports = await list_channel_video_reports(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db, page=1, limit=2,
+    )
+    assert [r.report_uuid for r in reports] == [r.report_uuid for r in newest_first[:2]]
+
+
+@pytest.mark.asyncio
+async def test_list_reports_second_page_offsets(db, org, admin_user, published_video):
+    newest_first = await _reports_newest_first(db, org, published_video, 5)
+    reports = await list_channel_video_reports(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db, page=2, limit=2,
+    )
+    assert [r.report_uuid for r in reports] == [r.report_uuid for r in newest_first[2:4]]
+
+
+@pytest.mark.asyncio
+async def test_list_reports_page_beyond_end_is_empty(db, org, admin_user, published_video):
+    await _reports_newest_first(db, org, published_video, 3)
+    reports = await list_channel_video_reports(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db, page=99, limit=10,
+    )
+    assert reports == []
+
+
+@pytest.mark.asyncio
+async def test_list_reports_pagination_still_admin_only(
+    db, org, regular_user, anonymous_user, published_video
+):
+    """SECURITY (9A): the admin gate runs before paging, not after."""
+    with pytest.raises(HTTPException) as exc:
+        await list_channel_video_reports(
+            request=None, org_id=org.id, current_user=regular_user,
+            db_session=db, page=1, limit=10,
+        )
+    assert exc.value.status_code == 403
+
+    with pytest.raises(HTTPException) as exc:
+        await list_channel_video_reports(
+            request=None, org_id=org.id, current_user=anonymous_user,
+            db_session=db, page=1, limit=10,
+        )
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_list_reports_pagination_composes_with_status_filter(
+    db, org, admin_user, published_video
+):
+    await _reports_newest_first(db, org, published_video, 3)
+    resolved = ChannelVideoReport(
+        report_uuid="channelvideoreport_pgres",
+        channelvideo_id=published_video.id,
+        reporter_id=2000,
+        org_id=org.id,
+        reason="OTHER",
+        details=None,
+        status="RESOLVED",
+        creation_date="2026-04-09 00:00:00.000000",
+    )
+    db.add(resolved)
+    await db.commit()
+
+    open_page = await list_channel_video_reports(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        status="OPEN", page=1, limit=2,
+    )
+    assert len(open_page) == 2
+    assert all(r.status == "OPEN" for r in open_page)
+
+
+@pytest.mark.asyncio
+async def test_list_reports_pagination_stays_org_scoped(
+    db, org, other_org, admin_user, published_video
+):
+    """SECURITY (9A): cross-org isolation must survive paging — another org's
+    report never appears in this org's queue."""
+    await _reports_newest_first(db, org, published_video, 2)
+    db.add(ChannelVideoReport(
+        report_uuid="channelvideoreport_otherorg",
+        channelvideo_id=published_video.id,
+        reporter_id=3000,
+        org_id=other_org.id,
+        reason="SPAM",
+        details=None,
+        status="OPEN",
+        creation_date="2026-04-20 00:00:00.000000",
+    ))
+    await db.commit()
+
+    reports = await list_channel_video_reports(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db, page=1, limit=50,
+    )
+    assert all(r.report_uuid != "channelvideoreport_otherorg" for r in reports)
+    assert len(reports) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_reports_default_call_still_works(db, org, admin_user, published_video):
+    """The Phase 8B call signature must keep working."""
+    await _reports_newest_first(db, org, published_video, 2)
+    reports = await list_channel_video_reports(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+    )
+    assert len(reports) == 2

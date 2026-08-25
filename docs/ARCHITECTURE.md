@@ -1239,6 +1239,119 @@ No `is_suspended`/ban concept exists anywhere in this codebase for either `User`
 been a genuinely new concept (new column, new endpoint, new authorization check), unlike the wiring-only path,
 which added zero new backend surface. Revisit only on an explicit future ask, not as a natural follow-on to 8D.
 
+### V1 Hardening (Phase 9A) — parent-child link revocation reuses `REJECTED`, no new enum value or migration
+
+**Context.** 9A audited the authorization, data-exposure, and abuse-resistance properties of the API surface
+LearnOrbit added in Phases 1–8 (20 new service modules, 3 new routers, the LearnOrbit endpoints on the `orgs`
+and `users` routers, 13 new `db/` models). Inherited LearnHouse code was out of scope except at LearnOrbit call
+sites. The audit confirmed the existing patterns hold — see docs/PROGRESS.md Phase 9A for the full
+verified/finding classification — and produced one code change, recorded here.
+
+**Decision — either party may revoke an APPROVED `ParentChildLink`, and revocation sets `REJECTED`.**
+
+The gap: `respond_to_parent_link` only accepts PENDING links (`_get_own_pending_link_or_404` raises 400
+otherwise), and no other endpoint mutated an approved link. So once a child approved, the link was permanent,
+and `services/users/child_progress.py` grants an approved parent ongoing, **cross-org** read access to the
+child's entire quiz history. Consent that cannot be withdrawn is not consent — and unlike every other 7B
+limitation, this one was **not** in the documented deferral list for Phase 7B, so it was a gap rather than an
+accepted scope boundary.
+
+Three sub-decisions:
+
+1. **Reuse `REJECTED` rather than adding a `REVOKED` enum value.** `ParentChildLinkStatusEnum` is persisted as
+   a string column; a new member would mean a migration and a new state every existing query would have to
+   learn. `REJECTED` already means exactly "not an active grant", and every existing consumer
+   (`list_my_parent_links`, `_require_approved_link`) filters on `APPROVED` positively, so they need no change.
+   The cost is that the audit trail can't distinguish "declined a request" from "revoked a grant" — accepted,
+   consistent with 8B/8C's existing no-audit-trail posture for this domain.
+2. **Either party may revoke, not only the child.** The child withdrawing consent is the case that matters, but
+   a parent dropping a link they no longer need is harmless and symmetric. Guarded by membership of the pair,
+   with **404 not 403** for anyone else — same IDOR choice as `_get_own_pending_link_or_404` and
+   `_require_approved_link`, so a stranger can't probe which link uuids exist.
+3. **Revocation is APPROVED-only (400 otherwise).** Declining a PENDING request is already
+   `respond_to_parent_link`'s job; keeping revoke to the withdraw-an-existing-grant case leaves each endpoint
+   one responsibility.
+
+**Consequence worth noting:** because revocation lands on `REJECTED`, it reuses `request_parent_link`'s existing
+re-open path — a parent may request again, but the link returns as PENDING and needs the child's fresh approval.
+The parent cannot unilaterally undo a revocation. This is asserted directly by
+`test_revoked_link_requires_fresh_approval_to_be_restored`.
+
+**Not changed (deferred, with rationale in docs/PROGRESS.md Phase 9A):** rate limiting on LearnOrbit's
+user-generated-content endpoints, and the unregistered CSRF origin-validation middleware (inherited; mitigated
+by `SameSite=Lax`).
+
+
+### V1 Hardening (Phase 9B) — every LearnOrbit list endpoint is paginated, and the window never carries authorization
+
+**Context.** 9B reviewed the LearnOrbit-added surface for query cost, request fan-out, and payload size. The
+dominant finding was structural rather than incidental: six LearnOrbit list endpoints returned unbounded result
+sets, including the two that are not scoped to an organization at all (`GET /shorts`, cross-org and public;
+`GET /feed`, cross-org and per-viewer). See docs/PROGRESS.md Phase 9B for the full finding classification.
+
+**Decision — `page`/`limit` query params, `default=50, ge=1, le=100`, applied as the last clause of the
+statement.**
+
+1. **Reuse the existing convention rather than inventing one.** `routers/orgs/orgs.py`'s already-paginated
+   endpoints use exactly `Query(default=..., ge=1, le=100)` with the `le=100` cap documented as a
+   data-dumping guard. Every endpoint paginated in 9B matches that shape, so there is one pagination contract
+   across the API, not two.
+2. **The window is applied last, after the filters and after the visibility predicate — never instead of
+   either.** This is the load-bearing rule. `list_public_shorts`'s published+public predicate,
+   `list_home_feed`'s 401 gate and follow-scoping, `list_questions`'s and `list_channel_video_reports`'s
+   admin gate and `org_id` scoping all run ahead of `.offset().limit()`. Paging therefore changes *how much*
+   a caller sees and never *what they may* see — 9A's authorization conclusions survive unchanged, and each
+   paginated service carries a test asserting exactly that.
+3. **Defaults preserve the existing call signature.** Every service keeps working when called with no
+   pagination arguments, so the Phase 3C/4G/6B/8B call sites and their tests are unaffected. This is an API
+   *contract* change for external consumers — a caller that assumed a complete list now gets the first 50 —
+   which is why the defaults are generous rather than small.
+
+**Frontend consequence — a fetch that feeds a count badge must not be confused with a fetch that feeds a
+list.** `ChannelVideoCommentsPanel` is mounted on every watch page and both Shorts rails, and fetched 100
+comments unconditionally to render one integer on a closed trigger. It now fetches a 20-row preview while
+closed and the full page once opened, with `limit` as part of the React Query key so the preview can never be
+served as the complete list. Because a saturated preview means "at least 20", the trigger renders `20+` rather
+than reporting the preview size as the true count — a count that is bounded must be *labelled* as bounded.
+The same closed-surface reasoning applies to `NotificationBell`, which gates its 50-row list on the dropdown
+actually being open and leaves the badge to the existing cheap unread-count endpoint.
+
+**Convention established:** any new LearnOrbit list endpoint is paginated from the start, and any client fetch
+that exists only to render a count either uses a dedicated count endpoint or labels its result as a bound.
+
+**Not changed (deferred, with rationale in docs/PROGRESS.md Phase 9B):** the combined engagement endpoint (the
+watch page still issues four separate status requests that each re-resolve org + video) and a composite/partial
+index for the Shorts predicate — both deliberately held for measurement rather than changed on inference.
+`GET /orgs/{id}/videos|resources|quizzes` remain unpaginated because their section components fetch an
+unfiltered baseline purely to populate filter dropdowns; paginating the endpoint without addressing that
+coupling would silently truncate the dropdown options.
+
+### V1 Hardening (Phase 9C) — state colour splits into fill vs. text tokens, and a11y invariants are guarded by test, not lint
+
+Two conventions came out of the Phase 9C accessibility review; both are load-bearing for future UI work.
+
+**1. `--success` / `--warning` are fill tokens; `--success-strong` / `--warning-strong` are the text tokens.**
+`docs/DESIGN_SYSTEM.md` §3 asserted that every token pairing met WCAG AA. Measured, two did not: on
+`--background` in light mode `--success` is 3.31:1 and `--warning` is 2.16:1, against a 4.5:1 floor for body
+text. Rather than change the base tokens — which would shift every icon, border and fill already using them,
+and which are legitimately fine at the 3:1 non-text bar — 9C added darker text-only companions. The rule:
+**colour that carries a word uses `-strong`; colour that carries a shape uses the base token.** Both are
+defined in `styles/globals.css` for light and dark. In dark mode the relationship inverts (the base tokens are
+already the readable ones), so the `-strong` variants are defined lighter there; no dark theme ships in V1.
+
+**2. Accessibility invariants are enforced by `apps/web/tests/a11y-guard.test.mjs`, not by new lint rules.**
+`eslint-config-next` already bundles a subset of `eslint-plugin-jsx-a11y`, but the rules that would catch 9C's
+findings (label association, ARIA pattern misuse, contrast) don't all exist, and enabling the fuller set would
+light up the inherited LearnHouse tree — CI lints *whole* changed files, so a PR would be blocked on debt it
+merely walked past. This is the same reasoning `eslint.config.mjs` already records for the React Compiler
+rules. The guard test instead asserts a scoped set of invariants over the LearnOrbit-added surface only: the
+`<main>` landmark and skip link exist, active nav carries `aria-current`, placeholder-only controls carry a
+name, the quiz options don't re-claim the ARIA radiogroup contract, the exam timer stays out of a live region,
+and the banned sub-4.5:1 text colours don't return. It follows the existing `tests/rtl-guard.test.mjs` pattern
+(static source assertions for things ESLint can't see) and adds no dependency. Note it reads **code only** —
+comments are stripped first, since the 9C comments quote the removed attributes verbatim.
+
+
 ## Areas To Map
 - Frontend application
 - API/backend

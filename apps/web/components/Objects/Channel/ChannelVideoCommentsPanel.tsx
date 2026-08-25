@@ -4,7 +4,7 @@ import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import { Loader2, MessageCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { AlertCircle, Loader2, MessageCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useLHSession } from '@components/Contexts/LHSessionContext'
 import {
@@ -13,7 +13,10 @@ import {
   useUpdateChannelVideoComment,
   useDeleteChannelVideoComment,
 } from '@/hooks/queries/useChannelVideoEngagement'
-import type { ChannelVideoComment } from '@services/organizations/channelVideos'
+import {
+  CHANNEL_VIDEO_COMMENTS_PREVIEW_LIMIT,
+  type ChannelVideoComment,
+} from '@services/organizations/channelVideos'
 import { getUserAvatarMediaDirectory } from '@services/media/media'
 import { Button } from '@components/ui/button'
 import { Textarea } from '@components/ui/textarea'
@@ -44,7 +47,15 @@ interface ChannelVideoCommentsPanelProps {
   channelVideoId: number | string | undefined
   /** Custom Dialog trigger visual (Phase 4F, Shorts rail) — defaults to the
    * standard ghost Button used on the long-form watch page when omitted. */
-  trigger?: (_props: { commentCount: number | undefined; isLoading: boolean }) => React.ReactNode
+  /** `commentCountLabel` is the display string — it may read "20+" while the
+   * panel is closed, since only a preview is fetched then (Phase 9B).
+   * `commentCount` stays the raw fetched length for any caller that needs a
+   * number rather than a label. */
+  trigger?: (_props: {
+    commentCount: number | undefined
+    commentCountLabel: string | undefined
+    isLoading: boolean
+  }) => React.ReactNode
 }
 
 function getAvatarUrl(author: ChannelVideoComment['author']): string | null {
@@ -72,6 +83,8 @@ function CommentComposer({
   onCancel?: () => void
   autoFocus?: boolean
 }) {
+  const { t } = useTranslation()
+  const fieldId = React.useId()
   const [value, setValue] = useState(initialValue)
   const remaining = MAX_COMMENT_LENGTH - value.length
   const overLimit = remaining < 0
@@ -85,7 +98,14 @@ function CommentComposer({
 
   return (
     <div className="space-y-2">
+      {/* Phase 9C: the composer was placeholder-only, which docs/DESIGN_SYSTEM.md
+          §22 forbids outright — `placeholder` doubles as the accessible name
+          here rather than adding a visible label the layout has no room for. */}
       <Textarea
+        id={fieldId}
+        aria-label={placeholder}
+        aria-describedby={`${fieldId}-count`}
+        aria-invalid={overLimit || undefined}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder={placeholder}
@@ -97,10 +117,31 @@ function CommentComposer({
         }}
       />
       <div className="flex items-center justify-between gap-2">
+        {/* Over-limit pairs the color change with an icon + wording, so color
+            isn't the only signal (§22 / WCAG 1.4.1). */}
         <span
-          className={`text-xs ${overLimit ? 'text-red-600' : 'text-muted-foreground'}`}
+          id={`${fieldId}-count`}
+          className={`text-xs ${overLimit ? 'inline-flex items-center gap-1 font-semibold text-destructive' : 'text-muted-foreground'}`}
         >
-          {remaining}
+          {overLimit ? (
+            <>
+              <AlertCircle size={12} aria-hidden="true" />
+              {t('video.comments.overLimit', {
+                defaultValue: '{{count}} over the limit',
+                count: -remaining,
+              })}
+            </>
+          ) : (
+            <>
+              <span aria-hidden="true">{remaining}</span>
+              <span className="sr-only">
+                {t('video.comments.charactersRemaining', {
+                  defaultValue: '{{count}} characters remaining',
+                  count: remaining,
+                })}
+              </span>
+            </>
+          )}
         </span>
         <div className="flex items-center gap-2">
           {onCancel && (
@@ -229,7 +270,9 @@ export function ChannelVideoCommentsPanel({ orgId, channelVideoId, trigger }: Ch
   const currentUserId = session?.data?.user?.id
   const [open, setOpen] = useState(false)
 
-  const { data: comments, isLoading } = useChannelVideoComments(orgId, channelVideoId)
+  // Phase 9B: while closed, only a small preview is fetched — enough for the
+  // trigger's count badge. Opening the panel switches to the full fetch.
+  const { data: comments, isLoading } = useChannelVideoComments(orgId, channelVideoId, open)
   const createComment = useCreateChannelVideoComment(orgId, channelVideoId)
 
   const handleCreate = (content: string) => {
@@ -241,12 +284,21 @@ export function ChannelVideoCommentsPanel({ orgId, channelVideoId, trigger }: Ch
   }
 
   const commentCount = comments?.length
+  // The closed panel fetches only a preview, so a saturated preview means
+  // "at least this many", not "exactly this many" — label it honestly rather
+  // than reporting the preview size as the true count (Phase 9B).
+  const commentCountLabel =
+    commentCount === undefined
+      ? undefined
+      : !open && commentCount >= CHANNEL_VIDEO_COMMENTS_PREVIEW_LIMIT
+        ? `${CHANNEL_VIDEO_COMMENTS_PREVIEW_LIMIT}+`
+        : String(commentCount)
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger ? (
-          trigger({ commentCount, isLoading })
+          trigger({ commentCount, commentCountLabel, isLoading })
         ) : (
           <Button
             type="button"
@@ -256,13 +308,18 @@ export function ChannelVideoCommentsPanel({ orgId, channelVideoId, trigger }: Ch
             className="gap-1.5 px-3"
           >
             <MessageCircle size={16} aria-hidden="true" className="text-muted-foreground" />
-            {commentCount !== undefined && (
-              <span className="text-muted-foreground">{commentCount}</span>
+            {commentCountLabel !== undefined && (
+              <span className="text-muted-foreground">{commentCountLabel}</span>
             )}
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] flex flex-col p-6">
+      {/* Phase 9D (M6): the primitive is `w-full max-w-lg` with no inset, so at
+          360px the dialog ran edge to edge; and `85vh` ignores the on-screen
+          keyboard, which put the composer and Post button underneath it.
+          Sized here rather than in components/ui/dialog.tsx — that primitive is
+          inherited and shared with the whole LearnHouse tree. */}
+      <DialogContent className="w-[95vw] sm:w-full max-h-[85dvh] flex flex-col p-6">
         <DialogHeader>
           <DialogTitle>{t('video.comments.title', { defaultValue: 'Comments' })}</DialogTitle>
         </DialogHeader>

@@ -157,9 +157,15 @@ function QuestionsHome({ orgslug: _orgslug }: QuestionsProps) {
       {hasAnyQuestionsEver && (
         <div className="mb-6 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
           <div className="relative w-full sm:w-80">
-            <Search className="absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+            {/* Phase 9C: placeholder-only search field with an unnamed clear
+                button; the icon also sat below the 3:1 non-text floor. */}
+            <Search
+              aria-hidden="true"
+              className="absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4"
+            />
             <input
-              type="text"
+              type="search"
+              aria-label={t('question.dash.search', { defaultValue: 'Search prompts' })}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('question.dash.search', { defaultValue: 'Search prompts' })}
@@ -167,10 +173,12 @@ function QuestionsHome({ orgslug: _orgslug }: QuestionsProps) {
             />
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute end-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                aria-label={t('common.clearSearch', { defaultValue: 'Clear search' })}
+                className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4" aria-hidden="true" />
               </button>
             )}
           </div>

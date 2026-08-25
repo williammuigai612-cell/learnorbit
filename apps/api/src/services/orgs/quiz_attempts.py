@@ -17,7 +17,7 @@ stripped too. Only the graded response — after `submit_quiz_attempt` — ever
 reveals them, and only to that attempt's own user.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -145,6 +145,40 @@ def _require_own_attempt(acting_user_id: int, attempt: QuizAttempt) -> None:
 
 def _now() -> str:
     return str(datetime.now(timezone.utc).replace(tzinfo=None))
+
+
+def _require_within_time_limit(quiz: Quiz, attempt: QuizAttempt) -> None:
+    """SECURITY: a quiz's time limit decides *when* an attempt may still be
+    submitted, so it is enforced here, server-side. `QuizTimer.tsx` is a
+    convenience for the student — a client that never fires it, or one that
+    is patched, still cannot have a late attempt graded.
+
+    Timezone: `started_at` is written by `_now()` as a naive string that is
+    already UTC, so it is re-stamped as UTC before comparison. Comparing it
+    against a local-time "now" would shift every deadline by the server's
+    offset. An aware value is left alone rather than clobbered.
+
+    Boundary: a submission landing exactly on the deadline is still accepted
+    — a 30-minute quiz means 30 minutes inclusive. Only `now > deadline` is
+    expired. There is deliberately no clock-skew grace window; adding one is
+    a product decision, not a security default.
+    """
+    if quiz.time_limit_minutes is None:
+        return
+
+    try:
+        started = datetime.fromisoformat(attempt.started_at)
+    except (TypeError, ValueError):
+        # Fail closed: a timed attempt whose start cannot be established
+        # cannot be shown to be inside its window, so it is not graded.
+        raise HTTPException(status_code=409, detail="This attempt has expired")
+
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+
+    deadline = started + timedelta(minutes=quiz.time_limit_minutes)
+    if datetime.now(timezone.utc) > deadline:
+        raise HTTPException(status_code=409, detail="This attempt has expired")
 
 
 async def _quiz_questions_ordered(quiz_id: int, db_session: AsyncSession) -> list[Question]:
@@ -315,6 +349,11 @@ async def submit_quiz_attempt(
 
     if attempt.status != "in_progress":
         raise HTTPException(status_code=409, detail="This attempt has already been submitted")
+
+    # Checked before any answer is read or graded, so an expired attempt can
+    # never reach the grader — and before the answer-shape validation below,
+    # so a late submission cannot be probed for question ids either.
+    _require_within_time_limit(quiz, attempt)
 
     submitted_ids = [a.question_id for a in data.answers]
     if len(submitted_ids) != len(set(submitted_ids)):

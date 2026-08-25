@@ -831,3 +831,155 @@ async def test_home_feed_spans_multiple_followed_channels(
 
     results = await list_home_feed(regular_user, db)
     assert {v.id for v in results} == {v1.id, v2.id}
+
+
+# ── Pagination (Phase 9B) ───────────────────────────────────────────────────
+# 9B-1: /shorts and /feed were unbounded — every published Short on the
+# platform, and every video from every followed channel, in one response.
+# `creation_date` is set explicitly here (same technique as the
+# *_orders_newest_first tests above) so page boundaries are deterministic
+# rather than dependent on insertion timing.
+
+
+async def _shorts_newest_first(db, org, admin_user, course, count):
+    made = []
+    for i in range(count):
+        s = await _make_published_video(
+            db, org, admin_user, course, f"pgs{i}", content_format="short"
+        )
+        row = (await db.execute(
+            select(ChannelVideo).where(ChannelVideo.id == s.id)
+        )).scalars().first()
+        row.creation_date = f"2026-01-{i + 1:02d} 00:00:00.000000"
+        db.add(row)
+        made.append(s)
+    await db.commit()
+    return list(reversed(made))
+
+
+async def _feed_videos_newest_first(db, org, admin_user, regular_user, course, count):
+    await follow_organization(
+        request=None, org_id=org.id, current_user=regular_user, db_session=db
+    )
+    made = []
+    for i in range(count):
+        v = await _make_published_video(db, org, admin_user, course, f"pgf{i}")
+        row = (await db.execute(
+            select(ChannelVideo).where(ChannelVideo.id == v.id)
+        )).scalars().first()
+        row.creation_date = f"2026-02-{i + 1:02d} 00:00:00.000000"
+        db.add(row)
+        made.append(v)
+    await db.commit()
+    return list(reversed(made))
+
+
+@pytest.mark.asyncio
+async def test_public_shorts_respects_limit(db, org, admin_user, course):
+    newest_first = await _shorts_newest_first(db, org, admin_user, course, 5)
+    results = await list_public_shorts(db, page=1, limit=2)
+    assert [v.id for v in results] == [s.id for s in newest_first[:2]]
+
+
+@pytest.mark.asyncio
+async def test_public_shorts_second_page_offsets(db, org, admin_user, course):
+    newest_first = await _shorts_newest_first(db, org, admin_user, course, 5)
+    results = await list_public_shorts(db, page=2, limit=2)
+    assert [v.id for v in results] == [s.id for s in newest_first[2:4]]
+
+
+@pytest.mark.asyncio
+async def test_public_shorts_page_beyond_end_is_empty(db, org, admin_user, course):
+    await _shorts_newest_first(db, org, admin_user, course, 3)
+    assert await list_public_shorts(db, page=99, limit=10) == []
+
+
+@pytest.mark.asyncio
+async def test_public_shorts_pagination_preserves_visibility_predicate(
+    db, org, admin_user, course, activity
+):
+    """SECURITY (9A): pagination must not widen what an anonymous viewer can
+    see. A draft and an unlisted Short stay excluded with paging applied."""
+    published = await _make_published_video(
+        db, org, admin_user, course, "vispub", content_format="short"
+    )
+    await create_channel_video(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        data=ChannelVideoCreate(
+            activity_id=activity.id, title="draft short", content_format="short"
+        ),
+    )
+    await _make_published_video(
+        db, org, admin_user, course, "visunl",
+        content_format="short", visibility="unlisted",
+    )
+    results = await list_public_shorts(db, page=1, limit=50)
+    assert [v.id for v in results] == [published.id]
+
+
+@pytest.mark.asyncio
+async def test_public_shorts_default_call_still_works(db, org, admin_user, course):
+    """The Phase 3C call signature (db session only) must keep working."""
+    short = await _make_published_video(
+        db, org, admin_user, course, "def1", content_format="short"
+    )
+    assert [v.id for v in await list_public_shorts(db)] == [short.id]
+
+
+@pytest.mark.asyncio
+async def test_home_feed_respects_limit(db, org, admin_user, regular_user, course):
+    newest_first = await _feed_videos_newest_first(db, org, admin_user, regular_user, course, 5)
+    results = await list_home_feed(regular_user, db, page=1, limit=2)
+    assert [v.id for v in results] == [v.id for v in newest_first[:2]]
+
+
+@pytest.mark.asyncio
+async def test_home_feed_second_page_offsets(db, org, admin_user, regular_user, course):
+    newest_first = await _feed_videos_newest_first(db, org, admin_user, regular_user, course, 5)
+    results = await list_home_feed(regular_user, db, page=2, limit=2)
+    assert [v.id for v in results] == [v.id for v in newest_first[2:4]]
+
+
+@pytest.mark.asyncio
+async def test_home_feed_page_beyond_end_is_empty(db, org, admin_user, regular_user, course):
+    await _feed_videos_newest_first(db, org, admin_user, regular_user, course, 3)
+    assert await list_home_feed(regular_user, db, page=99, limit=10) == []
+
+
+@pytest.mark.asyncio
+async def test_home_feed_pagination_still_requires_authentication(db, anonymous_user):
+    """SECURITY (9A): the 401 gate is in front of the paging, not after it."""
+    with pytest.raises(HTTPException) as exc:
+        await list_home_feed(anonymous_user, db, page=1, limit=10)
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_home_feed_pagination_preserves_visibility_predicate(
+    db, org, admin_user, regular_user, course, activity
+):
+    """SECURITY (9A): drafts, unlisted videos and Shorts stay excluded with
+    paging applied."""
+    await follow_organization(
+        request=None, org_id=org.id, current_user=regular_user, db_session=db
+    )
+    visible = await _make_published_video(db, org, admin_user, course, "feedvis")
+    await create_channel_video(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        data=ChannelVideoCreate(activity_id=activity.id, title="draft long"),
+    )
+    await _make_published_video(db, org, admin_user, course, "feedunl", visibility="unlisted")
+    await _make_published_video(db, org, admin_user, course, "feedsh", content_format="short")
+
+    results = await list_home_feed(regular_user, db, page=1, limit=50)
+    assert [v.id for v in results] == [visible.id]
+
+
+@pytest.mark.asyncio
+async def test_home_feed_default_call_still_works(db, org, admin_user, regular_user, course):
+    """The Phase 4G call signature (user + db session) must keep working."""
+    await follow_organization(
+        request=None, org_id=org.id, current_user=regular_user, db_session=db
+    )
+    v = await _make_published_video(db, org, admin_user, course, "feeddef")
+    assert [i.id for i in await list_home_feed(regular_user, db)] == [v.id]

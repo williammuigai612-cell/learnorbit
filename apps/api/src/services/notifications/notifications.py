@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Union
 from uuid import uuid4
 
+from sqlalchemy import update
 from sqlmodel import SQLModel, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from fastapi import HTTPException
@@ -196,20 +197,19 @@ async def mark_all_notifications_read(
         raise HTTPException(status_code=401, detail="Authentication required")
     acting_user_id = resolve_acting_user_id(current_user)
 
-    unread = (
-        await db_session.execute(
-            select(Notification).where(
-                Notification.recipient_id == acting_user_id,
-                Notification.is_read == False,  # noqa: E712
-            )
+    # Phase 9B: a single bulk UPDATE rather than hydrating every unread row
+    # into Python to flip one boolean. `rowcount` gives the same number the
+    # previous `len(unread)` did, so the {"marked_read": n} contract is
+    # unchanged. The recipient_id predicate is what keeps this scoped to the
+    # acting user — it must never be relaxed.
+    result = await db_session.execute(
+        update(Notification)
+        .where(
+            Notification.recipient_id == acting_user_id,
+            Notification.is_read == False,  # noqa: E712
         )
-    ).scalars().all()
+        .values(is_read=True)
+    )
+    await db_session.commit()
 
-    for notification in unread:
-        notification.is_read = True
-        db_session.add(notification)
-
-    if unread:
-        await db_session.commit()
-
-    return len(unread)
+    return int(result.rowcount or 0)

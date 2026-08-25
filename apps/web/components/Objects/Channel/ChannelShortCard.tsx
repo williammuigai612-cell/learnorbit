@@ -57,7 +57,13 @@ export default function ChannelShortCard({ channelVideo, orgslug, orgId }: Chann
       >
         <div className="relative aspect-[9/16] w-full overflow-hidden rounded-t-lg bg-muted">
           {channelVideo.thumbnail_image ? (
-            <img src={channelVideo.thumbnail_image} alt="" className="h-full w-full object-cover" />
+            <img
+              src={channelVideo.thumbnail_image}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className="h-full w-full object-cover"
+            />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
               <Clapperboard className="text-muted-foreground" size={28} aria-hidden="true" />

@@ -1,6 +1,6 @@
 from typing import List, Union
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.core.events.database import get_db_session
@@ -24,7 +24,8 @@ router = APIRouter()
         "Reverse-chronological feed of published, publicly-visible long-form "
         "videos from channels the authenticated user follows. Excludes "
         "Shorts (see GET /shorts for those) and returns an empty list for a "
-        "user who follows no channels yet."
+        "user who follows no channels yet. Paginated newest-first; maximum "
+        "100 per page."
     ),
     responses={
         200: {"description": "Followed channels' videos, newest first.", "model": List[HomeFeedItem]},
@@ -32,7 +33,9 @@ router = APIRouter()
     },
 )
 async def api_get_home_feed(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=50, ge=1, le=100, description="Items per page (max 100)"),
     current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> List[HomeFeedItem]:
-    return await list_home_feed(current_user, db_session)
+    return await list_home_feed(current_user, db_session, page, limit)

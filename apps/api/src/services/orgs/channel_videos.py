@@ -257,7 +257,9 @@ async def list_channel_videos(
     return [ChannelVideoRead.model_validate(r) for r in rows]
 
 
-async def list_public_shorts(db_session: AsyncSession) -> list[ChannelVideoRead]:
+async def list_public_shorts(
+    db_session: AsyncSession, page: int = 1, limit: int = 50
+) -> list[ChannelVideoRead]:
     """Global, cross-org Shorts discovery feed (Phase 3C).
 
     Unlike `list_channel_videos`, this is deliberately NOT scoped to one
@@ -265,7 +267,13 @@ async def list_public_shorts(db_session: AsyncSession) -> list[ChannelVideoRead]
     only the same published+public predicate `list_channel_videos` already
     proves for anonymous viewers. See docs/ARCHITECTURE.md §
     "Videos / Shorts (Phase 3A)", point 4.
+
+    Paginated in Phase 9B: this is the only cross-org, cross-tenant listing
+    in V1, so an unbounded version grew with every Short published anywhere
+    on the platform. The window is applied *after* the visibility predicate,
+    never instead of it — paging must never widen what a viewer can see.
     """
+    offset = (page - 1) * limit
     statement = (
         select(ChannelVideo)
         .where(
@@ -274,13 +282,18 @@ async def list_public_shorts(db_session: AsyncSession) -> list[ChannelVideoRead]
             ChannelVideo.visibility == "public",
         )
         .order_by(ChannelVideo.creation_date.desc())
+        .offset(offset)
+        .limit(limit)
     )
     rows = (await db_session.execute(statement)).scalars().all()
     return [ChannelVideoRead.model_validate(r) for r in rows]
 
 
 async def list_home_feed(
-    current_user: PublicUser | AnonymousUser, db_session: AsyncSession
+    current_user: PublicUser | AnonymousUser,
+    db_session: AsyncSession,
+    page: int = 1,
+    limit: int = 50,
 ) -> list[HomeFeedItem]:
     """Reverse-chronological feed of long-form videos from channels the
     authenticated user follows (Phase 4G / roadmap "Home feed").
@@ -292,6 +305,11 @@ async def list_home_feed(
     would duplicate that surface, not extend it. No ranking/algorithm per
     PRD §5 — same published+public predicate and newest-first ordering as
     list_channel_videos/list_public_shorts.
+
+    Paginated in Phase 9B: an unbounded feed returned the union of every
+    followed channel's entire back catalogue in one response. The 401 gate
+    and the published+public predicate both run ahead of the window, so
+    paging changes how much a viewer sees, never what they may see.
     """
     if isinstance(current_user, AnonymousUser):
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -313,6 +331,8 @@ async def list_home_feed(
             ChannelVideo.visibility == "public",
         )
         .order_by(ChannelVideo.creation_date.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
     )
     rows = (await db_session.execute(statement)).all()
     return [

@@ -170,3 +170,28 @@ async def test_mark_all_read(db, org, admin_user, regular_user, published_video,
 
         count_resp = await client.get("/api/v1/notifications/unread-count")
     assert count_resp.json() == {"count": 0}
+
+
+# ── Pagination bounds at the HTTP boundary (Phase 9 re-verification) ────────
+# SECURITY_REVIEW.md §39 "Pagination and Resource Enumeration" requires a
+# maximum page size on list endpoints. This endpoint previously accepted an
+# arbitrary `limit`, letting one authenticated request pull an unbounded page.
+# Same cap/convention as GET /feed and GET /shorts (Phase 9B-1).
+
+@pytest.mark.asyncio
+async def test_notifications_rejects_out_of_range_pagination_params(
+    db, org, admin_user, client_as
+):
+    async with await client_as(admin_user) as client:
+        for query in ("?limit=101", "?limit=0", "?page=0", "?limit=100000"):
+            resp = await client.get(f"/api/v1/notifications{query}")
+            assert resp.status_code == 422, query
+
+
+@pytest.mark.asyncio
+async def test_notifications_accepts_in_range_pagination_params(
+    db, org, admin_user, client_as
+):
+    async with await client_as(admin_user) as client:
+        resp = await client.get("/api/v1/notifications?page=1&limit=100")
+    assert resp.status_code == 200

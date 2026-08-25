@@ -242,3 +242,46 @@ class TestRespondToParentLink:
             )
 
         assert response.status_code == 404
+
+
+class TestRevokeParentLink:
+    """Phase 9A finding F1 — consent withdrawal for an APPROVED link."""
+
+    async def test_revoke_returns_rejected_link(self, client):
+        with patch(
+            "src.routers.users.revoke_parent_link",
+            new_callable=AsyncMock,
+            return_value=_mock_link(status=ParentChildLinkStatusEnum.REJECTED),
+        ) as mocked:
+            response = await client.post(
+                "/api/v1/users/parent-links/parentlink_abc/revoke"
+            )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "REJECTED"
+        assert mocked.await_args.kwargs["link_uuid"] == "parentlink_abc"
+
+    async def test_revoke_unrelated_link_is_404(self, client):
+        """The service's IDOR guard surfaces as 404, not 403."""
+        with patch(
+            "src.routers.users.revoke_parent_link",
+            new_callable=AsyncMock,
+            side_effect=HTTPException(status_code=404, detail="Link not found"),
+        ):
+            response = await client.post(
+                "/api/v1/users/parent-links/parentlink_someone_else/revoke"
+            )
+
+        assert response.status_code == 404
+
+    async def test_revoke_non_approved_link_is_400(self, client):
+        with patch(
+            "src.routers.users.revoke_parent_link",
+            new_callable=AsyncMock,
+            side_effect=HTTPException(status_code=400, detail="Link is not approved"),
+        ):
+            response = await client.post(
+                "/api/v1/users/parent-links/parentlink_abc/revoke"
+            )
+
+        assert response.status_code == 400

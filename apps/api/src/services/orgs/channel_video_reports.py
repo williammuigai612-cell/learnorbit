@@ -196,6 +196,8 @@ async def list_channel_video_reports(
     current_user: Union[PublicUser, AnonymousUser],
     db_session: AsyncSession,
     status: Optional[str] = None,
+    page: int = 1,
+    limit: int = 50,
 ) -> list[ChannelVideoReportRead]:
     org = await _get_org_or_404(org_id, db_session)
     await _require_channel_admin(current_user, org.id, db_session)
@@ -204,6 +206,13 @@ async def list_channel_video_reports(
     if status is not None:
         statement = statement.where(ChannelVideoReport.status == status)
     statement = statement.order_by(ChannelVideoReport.creation_date.desc())
+
+    # Paginated in Phase 9B. 9A finding F2 named this queue as the concrete
+    # casualty of the (still deferred) missing rate limit on reporting — an
+    # unbounded queue degrades exactly when report volume spikes. The
+    # org_id predicate and the admin gate both run ahead of the window, so
+    # cross-org isolation is unaffected by paging.
+    statement = statement.offset((page - 1) * limit).limit(limit)
 
     rows = (await db_session.execute(statement)).scalars().all()
     return [_to_read(r) for r in rows]

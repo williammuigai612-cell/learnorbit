@@ -139,6 +139,7 @@ from src.services.orgs.quiz_attempts import (
     submit_quiz_attempt,
 )
 from src.services.orgs.progress import QuizProgressSummary, get_org_quiz_progress
+from src.services.security.rate_limiting import enforce_learnorbit_rate_limit
 from src.services.orgs.orgs import (
     create_org,
     create_org_with_config,
@@ -1767,6 +1768,7 @@ async def api_follow_org(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> OrganizationFollowStatus:
+    enforce_learnorbit_rate_limit("follow_toggle", current_user, request)
     return await follow_organization(request, org_id, current_user, db_session)
 
 
@@ -1790,6 +1792,7 @@ async def api_unfollow_org(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> OrganizationFollowStatus:
+    enforce_learnorbit_rate_limit("follow_toggle", current_user, request)
     return await unfollow_organization(request, org_id, current_user, db_session)
 
 
@@ -1819,6 +1822,7 @@ async def api_create_channel_video(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await create_channel_video(request, org_id, current_user, db_session, data)
 
 
@@ -1910,6 +1914,7 @@ async def api_update_channel_video(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await update_channel_video(
         request, org_id, channelvideo_id, current_user, db_session, data
     )
@@ -1935,6 +1940,7 @@ async def api_set_channel_video_published(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await set_channel_video_published(
         request, org_id, channelvideo_id, current_user, db_session, data
     )
@@ -1962,6 +1968,7 @@ async def api_delete_channel_video(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ):
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     await delete_channel_video(request, org_id, channelvideo_id, current_user, db_session)
     return {"detail": "Channel video removed"}
 
@@ -2018,6 +2025,7 @@ async def api_like_channel_video(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoLikeStatus:
+    enforce_learnorbit_rate_limit("reaction_toggle", current_user, request)
     return await like_channel_video(request, org_id, channelvideo_id, current_user, db_session)
 
 
@@ -2043,6 +2051,7 @@ async def api_unlike_channel_video(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoLikeStatus:
+    enforce_learnorbit_rate_limit("reaction_toggle", current_user, request)
     return await unlike_channel_video(request, org_id, channelvideo_id, current_user, db_session)
 
 
@@ -2098,6 +2107,7 @@ async def api_save_channel_video(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoSaveStatus:
+    enforce_learnorbit_rate_limit("reaction_toggle", current_user, request)
     return await save_channel_video(request, org_id, channelvideo_id, current_user, db_session)
 
 
@@ -2123,6 +2133,7 @@ async def api_unsave_channel_video(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoSaveStatus:
+    enforce_learnorbit_rate_limit("reaction_toggle", current_user, request)
     return await unsave_channel_video(request, org_id, channelvideo_id, current_user, db_session)
 
 
@@ -2180,6 +2191,7 @@ async def api_share_channel_video(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoShareStatus:
+    enforce_learnorbit_rate_limit("share_create", current_user, request)
     return await share_channel_video(request, org_id, channelvideo_id, current_user, db_session)
 
 
@@ -2204,8 +2216,8 @@ async def api_list_channel_video_comments(
     request: Request,
     org_id: int,
     channelvideo_id: int,
-    page: int = 1,
-    limit: int = 50,
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=50, ge=1, le=100, description="Items per page (max 100)"),
     current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> list[ChannelVideoCommentRead]:
@@ -2239,6 +2251,7 @@ async def api_create_channel_video_comment(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoCommentRead:
+    enforce_learnorbit_rate_limit("comment_write", current_user, request)
     return await create_channel_video_comment(
         request, org_id, channelvideo_id, data.content, current_user, db_session
     )
@@ -2266,6 +2279,7 @@ async def api_update_channel_video_comment(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoCommentRead:
+    enforce_learnorbit_rate_limit("comment_write", current_user, request)
     return await update_channel_video_comment(
         request, org_id, channelvideo_id, comment_uuid, data.content, current_user, db_session
     )
@@ -2290,6 +2304,7 @@ async def api_delete_channel_video_comment(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ):
+    enforce_learnorbit_rate_limit("comment_write", current_user, request)
     return await delete_channel_video_comment(
         request, org_id, channelvideo_id, comment_uuid, current_user, db_session
     )
@@ -2325,6 +2340,7 @@ async def api_create_channel_video_report(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoReportRead:
+    enforce_learnorbit_rate_limit("report_create", current_user, request)
     return await create_channel_video_report(
         request, org_id, channelvideo_id, data, current_user, db_session
     )
@@ -2353,11 +2369,13 @@ async def api_list_channel_video_reports(
     request: Request,
     org_id: int,
     status: Optional[str] = None,
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=50, ge=1, le=100, description="Items per page (max 100)"),
     current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> List[ChannelVideoReportRead]:
     return await list_channel_video_reports(
-        request, org_id, current_user, db_session, status=status
+        request, org_id, current_user, db_session, status=status, page=page, limit=limit
     )
 
 
@@ -2385,6 +2403,7 @@ async def api_resolve_channel_video_report(
     current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelVideoReportRead:
+    enforce_learnorbit_rate_limit("moderation_write", current_user, request)
     return await resolve_channel_video_report(
         request, org_id, report_uuid, data, current_user, db_session
     )
@@ -2413,6 +2432,7 @@ async def api_set_org_verification(
     current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> OrganizationRead:
+    enforce_learnorbit_rate_limit("moderation_write", current_user, request)
     return await set_org_verification(request, org_id, data, current_user, db_session)
 
 
@@ -2444,6 +2464,7 @@ async def api_create_channel_resource(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelResourceRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await create_channel_resource(request, org_id, current_user, db_session, data)
 
 
@@ -2535,6 +2556,7 @@ async def api_update_channel_resource(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelResourceRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await update_channel_resource(
         request, org_id, channelresource_id, current_user, db_session, data
     )
@@ -2560,6 +2582,7 @@ async def api_set_channel_resource_published(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ChannelResourceRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await set_channel_resource_published(
         request, org_id, channelresource_id, current_user, db_session, data
     )
@@ -2587,6 +2610,7 @@ async def api_delete_channel_resource(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ):
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     await delete_channel_resource(request, org_id, channelresource_id, current_user, db_session)
     return {"detail": "Channel resource removed"}
 
@@ -2615,6 +2639,7 @@ async def api_create_question(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> QuestionRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await create_question(request, org_id, current_user, db_session, data)
 
 
@@ -2642,6 +2667,8 @@ async def api_list_questions(
     level: Optional[str] = None,
     institution_context: Optional[str] = None,
     published: Optional[bool] = None,
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=50, ge=1, le=100, description="Items per page (max 100)"),
     current_user: Union[PublicUser, AnonymousUser] = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> List[QuestionRead]:
@@ -2649,6 +2676,7 @@ async def api_list_questions(
         request, org_id, current_user, db_session,
         subject=subject, topic=topic, level=level,
         institution_context=institution_context, published=published,
+        page=page, limit=limit,
     )
 
 
@@ -2699,6 +2727,7 @@ async def api_update_question(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> QuestionRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await update_question(request, org_id, question_id, current_user, db_session, data)
 
 
@@ -2726,6 +2755,7 @@ async def api_set_question_published(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> QuestionRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await set_question_published(request, org_id, question_id, current_user, db_session, data)
 
 
@@ -2747,6 +2777,7 @@ async def api_delete_question(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ):
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     await delete_question(request, org_id, question_id, current_user, db_session)
     return {"detail": "Question removed"}
 
@@ -2775,6 +2806,7 @@ async def api_create_quiz(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> QuizRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await create_quiz(request, org_id, current_user, db_session, data)
 
 
@@ -2864,6 +2896,7 @@ async def api_update_quiz(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> QuizRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await update_quiz(request, org_id, quiz_id, current_user, db_session, data)
 
 
@@ -2887,6 +2920,7 @@ async def api_set_quiz_published(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> QuizRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await set_quiz_published(request, org_id, quiz_id, current_user, db_session, data)
 
 
@@ -2912,6 +2946,7 @@ async def api_delete_quiz(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ):
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     await delete_quiz(request, org_id, quiz_id, current_user, db_session)
     return {"detail": "Quiz removed"}
 
@@ -2967,6 +3002,7 @@ async def api_attach_question_to_quiz(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> QuizQuestionRead:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await attach_question_to_quiz(request, org_id, quiz_id, current_user, db_session, data)
 
 
@@ -2995,6 +3031,7 @@ async def api_reorder_quiz_questions(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> List[QuizQuestionRead]:
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     return await reorder_quiz_questions(request, org_id, quiz_id, current_user, db_session, data)
 
 
@@ -3020,6 +3057,7 @@ async def api_detach_question_from_quiz(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ):
+    enforce_learnorbit_rate_limit("content_write", current_user, request)
     await detach_question_from_quiz(request, org_id, quiz_id, question_id, current_user, db_session)
     return {"detail": "Question detached"}
 
@@ -3052,6 +3090,7 @@ async def api_start_quiz_attempt(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> QuizAttemptRead:
+    enforce_learnorbit_rate_limit("quiz_attempt_start", current_user, request)
     return await start_quiz_attempt(request, org_id, quiz_id, current_user, db_session)
 
 

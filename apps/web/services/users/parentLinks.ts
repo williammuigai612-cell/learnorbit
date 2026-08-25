@@ -86,3 +86,17 @@ export async function getChildQuizProgress(
   )
   return errorHandling(result)
 }
+
+// Phase 9A (security review, F1): withdraw an APPROVED link. Either party may
+// call it; the API 404s if the caller isn't party to the link and 400s if the
+// link isn't approved.
+export async function revokeParentLink(
+  link_uuid: string,
+  access_token: string
+): Promise<ParentChildLink> {
+  const result = await fetch(
+    `${getAPIUrl()}users/parent-links/${link_uuid}/revoke`,
+    RequestBodyWithAuthHeader('POST', null, null, access_token)
+  )
+  return errorHandling(result)
+}

@@ -14,6 +14,7 @@ from src.services.users.password_reset import (
 from src.services.security.rate_limiting import (
     check_password_reset_rate_limit,
     check_invite_acceptance_rate_limit,
+    enforce_learnorbit_rate_limit,
 )
 from src.services.orgs.orgs import get_org_join_mechanism
 from src.security.auth import get_current_user, get_authenticated_user
@@ -51,6 +52,7 @@ from src.services.users.parent_links import (
     list_pending_parent_links,
     request_parent_link,
     respond_to_parent_link,
+    revoke_parent_link,
 )
 from src.services.users.child_progress import ChildQuizProgressSummary, get_child_quiz_progress
 
@@ -847,10 +849,12 @@ class ParentLinkResponse(BaseModel):
 )
 async def api_request_parent_link(
     *,
+    request: Request,
     db_session: AsyncSession = Depends(get_db_session),
     current_user: PublicUser = Depends(get_current_user),
     body: ParentLinkRequest,
 ) -> ParentChildLinkRead:
+    enforce_learnorbit_rate_limit("parent_link_write", current_user, request)
     link = await request_parent_link(
         current_user=current_user, child_username=body.child_username, db_session=db_session
     )
@@ -918,15 +922,53 @@ async def api_list_my_parent_links(
 )
 async def api_respond_to_parent_link(
     *,
+    request: Request,
     db_session: AsyncSession = Depends(get_db_session),
     current_user: PublicUser = Depends(get_current_user),
     link_uuid: str,
     body: ParentLinkResponse,
 ) -> ParentChildLinkRead:
+    enforce_learnorbit_rate_limit("parent_link_write", current_user, request)
     link = await respond_to_parent_link(
         current_user=current_user,
         link_uuid=link_uuid,
         approve=body.approve,
+        db_session=db_session,
+    )
+    return ParentChildLinkRead.model_validate(link)
+
+
+@router.post(
+    "/parent-links/{link_uuid}/revoke",
+    response_model=ParentChildLinkRead,
+    tags=["users"],
+    summary="Revoke an approved parent-child link",
+    description=(
+        "Withdraw an APPROVED parent-child link. Either party may revoke — "
+        "the child withdrawing consent is the primary case, since an approved "
+        "link grants the parent ongoing access to the child's quiz activity "
+        "across every channel. The link returns to a non-approved state; "
+        "restoring it requires a fresh request and a fresh approval by the "
+        "child. Only PENDING requests are handled by the respond endpoint."
+    ),
+    responses={
+        200: {"description": "Link revoked.", "model": ParentChildLinkRead},
+        400: {"description": "Link is not approved"},
+        401: {"description": "Not authenticated"},
+        404: {"description": "No such link, or the caller is not party to it"},
+    },
+)
+async def api_revoke_parent_link(
+    *,
+    request: Request,
+    db_session: AsyncSession = Depends(get_db_session),
+    current_user: PublicUser = Depends(get_current_user),
+    link_uuid: str,
+) -> ParentChildLinkRead:
+    enforce_learnorbit_rate_limit("parent_link_write", current_user, request)
+    link = await revoke_parent_link(
+        current_user=current_user,
+        link_uuid=link_uuid,
         db_session=db_session,
     )
     return ParentChildLinkRead.model_validate(link)

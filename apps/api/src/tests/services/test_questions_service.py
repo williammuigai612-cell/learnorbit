@@ -435,3 +435,103 @@ async def test_admin_of_another_org_cannot_manage_this_channels_question(
     )).scalars().first()
     assert row is not None
     assert row.prompt == "What is 2 + 2?"
+
+
+# ── Pagination (Phase 9B) ───────────────────────────────────────────────────
+# 9B-1: the question bank is designed to accumulate hundreds of reusable
+# items, and list_questions returned all of them in one response.
+
+
+async def _questions_newest_first(db, org, admin_user, count):
+    made = []
+    for i in range(count):
+        q = await create_question(
+            request=None, org_id=org.id, current_user=admin_user,
+            db_session=db, data=_mc_data(),
+        )
+        row = (await db.execute(select(Question).where(Question.id == q.id))).scalars().first()
+        row.creation_date = f"2026-03-{i + 1:02d} 00:00:00.000000"
+        db.add(row)
+        made.append(q)
+    await db.commit()
+    return list(reversed(made))
+
+
+@pytest.mark.asyncio
+async def test_list_questions_respects_limit(db, org, admin_user):
+    newest_first = await _questions_newest_first(db, org, admin_user, 5)
+    results = await list_questions(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db, page=1, limit=2,
+    )
+    assert [q.id for q in results] == [q.id for q in newest_first[:2]]
+
+
+@pytest.mark.asyncio
+async def test_list_questions_second_page_offsets(db, org, admin_user):
+    newest_first = await _questions_newest_first(db, org, admin_user, 5)
+    results = await list_questions(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db, page=2, limit=2,
+    )
+    assert [q.id for q in results] == [q.id for q in newest_first[2:4]]
+
+
+@pytest.mark.asyncio
+async def test_list_questions_page_beyond_end_is_empty(db, org, admin_user):
+    await _questions_newest_first(db, org, admin_user, 3)
+    results = await list_questions(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db, page=99, limit=10,
+    )
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_list_questions_pagination_still_admin_only(db, org, regular_user, anonymous_user):
+    """SECURITY (9A): the admin gate runs before paging, not after."""
+    with pytest.raises(HTTPException) as exc:
+        await list_questions(
+            request=None, org_id=org.id, current_user=regular_user,
+            db_session=db, page=1, limit=10,
+        )
+    assert exc.value.status_code == 403
+
+    with pytest.raises(HTTPException) as exc:
+        await list_questions(
+            request=None, org_id=org.id, current_user=anonymous_user,
+            db_session=db, page=1, limit=10,
+        )
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_list_questions_pagination_composes_with_filters(db, org, admin_user):
+    """A filter plus a limit must apply the filter first, then page the
+    filtered set — not page the whole bank and filter the page."""
+    for _ in range(3):
+        await create_question(
+            request=None, org_id=org.id, current_user=admin_user, db_session=db,
+            data=_mc_data(subject="Mathematics"),
+        )
+    for _ in range(3):
+        await create_question(
+            request=None, org_id=org.id, current_user=admin_user, db_session=db,
+            data=_mc_data(subject="Biology"),
+        )
+
+    page = await list_questions(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        subject="Biology", page=1, limit=2,
+    )
+    assert len(page) == 2
+    assert all(q.subject == "Biology" for q in page)
+
+
+@pytest.mark.asyncio
+async def test_list_questions_default_call_still_works(db, org, admin_user):
+    """The Phase 6B call signature must keep working."""
+    await create_question(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db, data=_mc_data(),
+    )
+    results = await list_questions(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+    )
+    assert len(results) == 1

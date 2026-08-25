@@ -8,7 +8,9 @@ import { useJoinBannerVisible, JOIN_BANNER_HEIGHT } from '@components/Objects/Ba
 import { getUriWithOrg } from '@services/config/config'
 import { cn } from '@/lib/utils'
 
-const HEADER_HEIGHT = 60
+// Exported so OrgMenuChrome can subtract the same fixed-header height when it
+// computes --org-content-viewport, rather than repeating the number.
+export const HEADER_HEIGHT = 60
 
 // Persistent left sidebar (desktop, >= lg) for an org's primary destinations —
 // per docs/DESIGN_SYSTEM.md §14. Reflows content (never overlays it, see
@@ -35,13 +37,19 @@ export function OrgSidebar({ orgslug }: { orgslug: string }) {
   const isHomeActive = pathname === homeHref || pathname?.startsWith(`${homeHref}/`)
 
   return (
+    // Phase 9C: the label used to sit on the <aside> (a complementary
+    // landmark), leaving the real <nav> unnamed — so a screen reader announced
+    // "complementary: Primary navigation" plus an anonymous navigation. The
+    // name belongs on the navigation landmark itself.
     <aside
-      aria-label="Primary navigation"
       className="hidden lg:flex lg:flex-col fixed start-0 bottom-0 w-60 border-e border-border bg-background overflow-y-auto"
       style={{ top: topOffset, zIndex: 'var(--z-nav)' }}
     >
-      <nav className="flex flex-col gap-1 p-3">
-        <Link href={homeHref}>
+      <nav
+        aria-label={t('a11y.primaryNavigation', { defaultValue: 'Primary navigation' })}
+        className="flex flex-col gap-1 p-3"
+      >
+        <Link href={homeHref} aria-current={isHomeActive ? 'page' : undefined}>
           <span
             className={cn(
               'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold transition-colors',
@@ -52,7 +60,7 @@ export function OrgSidebar({ orgslug }: { orgslug: string }) {
             <span className="truncate">{t('feed.nav.label', { defaultValue: 'Home' })}</span>
           </span>
         </Link>
-        <Link href={shortsHref}>
+        <Link href={shortsHref} aria-current={isShortsActive ? 'page' : undefined}>
           <span
             className={cn(
               'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold transition-colors',
@@ -84,7 +92,7 @@ export function OrgSidebar({ orgslug }: { orgslug: string }) {
               {content}
             </a>
           ) : (
-            <Link key={item.key} href={item.href}>
+            <Link key={item.key} href={item.href} aria-current={isActive ? 'page' : undefined}>
               {content}
             </Link>
           )

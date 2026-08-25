@@ -48,9 +48,14 @@ export const queryKeys = {
     // Phase 4D
     save: (orgId: number, channelVideoId: number | string) =>
       ['channelVideo', orgId, channelVideoId, 'save'] as const,
-    // Phase 4C
+    // Phase 4C. The Phase 9B `limit` segment separates the small preview
+    // fetched while the panel is closed (badge only) from the full fetch
+    // once it opens. Mutations update both entries at once by prefix-matching
+    // this base key with setQueriesData — see useChannelVideoEngagement.ts.
     comments: (orgId: number, channelVideoId: number | string) =>
       ['channelVideo', orgId, channelVideoId, 'comments'] as const,
+    commentsPage: (orgId: number, channelVideoId: number | string, limit: number) =>
+      ['channelVideo', orgId, channelVideoId, 'comments', limit] as const,
     // Phase 4E
     share: (orgId: number, channelVideoId: number | string) =>
       ['channelVideo', orgId, channelVideoId, 'share'] as const,
@@ -168,6 +173,14 @@ export const queryKeys = {
     // (same rationale as feed.home: content is personal to the caller).
     list: (userId: number | undefined) => ['notifications', 'list', userId] as const,
     unreadCount: (userId: number | undefined) => ['notifications', 'unreadCount', userId] as const,
+  },
+  publicUsers: {
+    // Phase 9B — another user's public profile (UserReadPublic via GET
+    // /users/id/{id}), resolved for display only (name/username/avatar).
+    // Keyed by user id alone, not by viewer: the endpoint returns the same
+    // public projection to every caller, so two rows showing the same person
+    // share one cache entry and one request.
+    byId: (userId: number | undefined) => ['publicUser', userId] as const,
   },
   parentLinks: {
     // Phase 7B-frontend — pending parent-link requests directed at the

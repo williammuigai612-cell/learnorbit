@@ -236,3 +236,46 @@ async def test_mark_all_notifications_read_rejects_anonymous(db, anonymous_user)
     with pytest.raises(HTTPException, match="Authentication required") as exc:
         await mark_all_notifications_read(anonymous_user, db)
     assert exc.value.status_code == 401
+
+
+# ── 9B-3: mark_all_notifications_read as a single bulk UPDATE ───────────────
+# Guards the specific risk of that refactor: an UPDATE whose WHERE clause is
+# scoped too widely would clear other users' notifications, and one scoped
+# too narrowly would miscount.
+
+@pytest.mark.asyncio
+async def test_mark_all_only_touches_the_acting_users_notifications(
+    db, org, admin_user, regular_user, published_video
+):
+    await create_comment_notifications(org.id, published_video.id, regular_user.id, db)
+    assert await get_unread_notification_count(admin_user, db) == 1
+
+    db.add(Notification(
+        notification_uuid="notification_other_recipient",
+        recipient_id=regular_user.id,
+        actor_id=admin_user.id,
+        channelvideo_id=published_video.id,
+        notification_type="COMMENT",
+        is_read=False,
+        creation_date=str(datetime.now()),
+    ))
+    await db.commit()
+    assert await get_unread_notification_count(regular_user, db) == 1
+
+    marked = await mark_all_notifications_read(admin_user, db)
+
+    assert marked == 1
+    assert await get_unread_notification_count(admin_user, db) == 0
+    # The other user's notification is untouched.
+    assert await get_unread_notification_count(regular_user, db) == 1
+
+
+@pytest.mark.asyncio
+async def test_mark_all_does_not_recount_already_read_notifications(
+    db, org, admin_user, regular_user, published_video
+):
+    await create_comment_notifications(org.id, published_video.id, regular_user.id, db)
+    assert await mark_all_notifications_read(admin_user, db) == 1
+    # Nothing unread left — a second call marks zero, it does not re-report
+    # the rows it already marked.
+    assert await mark_all_notifications_read(admin_user, db) == 0

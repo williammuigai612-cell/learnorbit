@@ -22,13 +22,20 @@ function useAuthedSession() {
   return { accessToken, userId, isAuthenticated }
 }
 
-export function useNotifications() {
+// Phase 9B: `enabled` gates the list on the dropdown actually being open.
+// The bell lives in the global org nav (OrgMenu), so an unconditional fetch
+// pulled 50 full notification rows plus 50 actor objects on *every*
+// authenticated page load, purely to have them ready in case the viewer
+// opened the panel. The unread badge is served by the separate, cheap
+// unread-count endpoint below, so the closed bell needs none of this.
+// staleTime keeps a reopen within 30s from refetching.
+export function useNotifications(enabled = true) {
   const { accessToken, userId, isAuthenticated } = useAuthedSession()
 
   return useQuery<Notification[]>({
     queryKey: queryKeys.notifications.list(userId),
     queryFn: () => listNotifications(accessToken!),
-    enabled: isAuthenticated && !!accessToken,
+    enabled: enabled && isAuthenticated && !!accessToken,
     staleTime: 30_000,
   })
 }

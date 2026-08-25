@@ -3,7 +3,7 @@ import React, { useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
-import { BarChart3, Check, X, Users } from 'lucide-react'
+import { BarChart3, Check, X, Users, Unlink, Loader2 } from 'lucide-react'
 import { useLHSession } from '@components/Contexts/LHSessionContext'
 import { useOrgMembership } from '@components/Contexts/OrgContext'
 import { updateProfile } from '@services/settings/profile'
@@ -17,12 +17,14 @@ import {
   usePendingParentLinks,
   useRequestParentLink,
   useRespondToParentLink,
+  useRevokeParentLink,
 } from '@/hooks/queries/useParentLinks'
 import type { ParentChildLink } from '@services/users/parentLinks'
 import { Switch } from '@components/ui/switch'
 import { Input } from '@components/ui/input'
 import { Button } from '@components/ui/button'
 import { Label } from '@components/ui/label'
+import ConfirmationModal from '@components/Objects/StyledElements/ConfirmationModal/ConfirmationModal'
 import UserAvatar from '@components/Objects/UserAvatar'
 
 function getAvatarUrl(user: any): string | undefined {
@@ -97,11 +99,15 @@ function LinkedFamilyRow({
   accessToken,
   currentUserId,
   orgslug,
+  onRevoke,
+  isRevoking,
 }: {
   link: ParentChildLink
   accessToken: string
   currentUserId: number
   orgslug: string
+  onRevoke: (_linkUuid: string) => void
+  isRevoking: boolean
 }) {
   const { t } = useTranslation()
   const isParentSide = link.parent_user_id === currentUserId
@@ -125,14 +131,52 @@ function LinkedFamilyRow({
           </p>
         </div>
       </div>
-      {isParentSide && (
-        <Button asChild size="sm" variant="outline" className="flex-shrink-0">
-          <Link href={getUriWithOrg(orgslug, `/account/family/${otherUserId}`)}>
-            <BarChart3 size={14} className="me-1" />
-            {t('account.family.linked.view_activity', { defaultValue: 'View activity' })}
-          </Link>
-        </Button>
-      )}
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {isParentSide && (
+          <Button asChild size="sm" variant="outline">
+            <Link href={getUriWithOrg(orgslug, `/account/family/${otherUserId}`)}>
+              <BarChart3 size={14} className="me-1" />
+              {t('account.family.linked.view_activity', { defaultValue: 'View activity' })}
+            </Link>
+          </Button>
+        )}
+        {/* Phase 9A (F1): consent withdrawal. Shown to both sides — for the
+            child this revokes the parent's ongoing access to their quiz
+            activity across every channel. */}
+        <ConfirmationModal
+          confirmationButtonText={t('account.family.linked.remove', {
+            defaultValue: 'Remove link',
+          })}
+          confirmationMessage={
+            isParentSide
+              ? t('account.family.linked.remove_confirm_parent', {
+                  defaultValue:
+                    'This ends the link and removes your access to their learning activity. They would need to approve a new request to restore it.',
+                })
+              : t('account.family.linked.remove_confirm_child', {
+                  defaultValue:
+                    'This ends the link and stops them seeing your learning activity. They would need to send a new request, which you can approve or decline.',
+                })
+          }
+          dialogTitle={t('account.family.linked.remove', { defaultValue: 'Remove link' })}
+          status="warning"
+          functionToExecute={() => onRevoke(link.link_uuid)}
+          dialogTrigger={
+            <button
+              type="button"
+              disabled={isRevoking}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 transition disabled:opacity-50"
+            >
+              {isRevoking ? (
+                <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+              ) : (
+                <Unlink size={14} aria-hidden="true" />
+              )}
+              {t('account.family.linked.remove', { defaultValue: 'Remove link' })}
+            </button>
+          }
+        />
+      </div>
     </div>
   )
 }
@@ -155,6 +199,7 @@ export default function AccountFamily() {
   const myLinksQuery = useMyParentLinks()
   const requestParentLinkMutation = useRequestParentLink()
   const respondToParentLinkMutation = useRespondToParentLink()
+  const revokeParentLinkMutation = useRevokeParentLink()
 
   const handleParentToggle = async (checked: boolean) => {
     if (!currentUser || isTogglingParent) return
@@ -234,6 +279,24 @@ export default function AccountFamily() {
     }
   }
 
+  const handleRevoke = async (linkUuid: string) => {
+    try {
+      await revokeParentLinkMutation.mutateAsync(linkUuid)
+      toast.success(
+        t('account.family.link_removed', { defaultValue: 'Link removed' })
+      )
+    } catch (e: any) {
+      toast.error(
+        getErrorMessage(
+          e?.detail,
+          t('account.family.revoke_error', {
+            defaultValue: 'Could not remove that link. Please try again.',
+          })
+        )
+      )
+    }
+  }
+
   const pendingLinks = pendingLinksQuery.data ?? []
   const myLinks = myLinksQuery.data ?? []
 
@@ -281,8 +344,14 @@ export default function AccountFamily() {
               {t('account.family.request_label', { defaultValue: "Request a link to a child's account" })}
             </Label>
             <div className="flex gap-2">
+              {/* Phase 9C: the error below was a detached <p> — no
+                  aria-invalid, no aria-describedby, no role="alert" — so it
+                  never reached a screen reader. Mirrors the field/error
+                  wiring the upload + question/quiz modals already use. */}
               <Input
                 id="child_username"
+                aria-invalid={!!childUsernameError}
+                aria-describedby={childUsernameError ? 'child_username-error' : undefined}
                 value={childUsername}
                 onChange={(e) => {
                   setChildUsername(e.target.value)
@@ -299,7 +368,9 @@ export default function AccountFamily() {
               </Button>
             </div>
             {childUsernameError && (
-              <p className="text-red-500 text-sm">{childUsernameError}</p>
+              <p id="child_username-error" role="alert" className="text-destructive text-sm">
+                {childUsernameError}
+              </p>
             )}
           </form>
         )}
@@ -338,6 +409,8 @@ export default function AccountFamily() {
                   accessToken={access_token}
                   currentUserId={currentUser.id}
                   orgslug={orgslug}
+                  onRevoke={handleRevoke}
+                  isRevoking={revokeParentLinkMutation.isPending}
                 />
               ))}
             </div>

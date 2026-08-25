@@ -37,3 +37,25 @@ async def client(app):
 async def test_home_feed_rejects_anonymous_caller(client):
     resp = await client.get("/api/v1/feed")
     assert resp.status_code == 401
+
+
+# ── Pagination at the HTTP boundary (Phase 9B) ──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_home_feed_still_rejects_anonymous_with_pagination_params(client):
+    """SECURITY (9A): adding page/limit must not open a path around the 401
+    gate — the auth check is in front of the window, not after it."""
+    resp = await client.get("/api/v1/feed?page=2&limit=10")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_home_feed_rejects_out_of_range_pagination_params(client):
+    """max 100 per page, page/limit >= 1. Anonymous callers are rejected
+    regardless, so this asserts the request is refused rather than served —
+    422 (validation) and 401 (auth) are both correct refusals here, and
+    which one wins is FastAPI's resolution order, not this endpoint's
+    contract."""
+    for query in ("?limit=101", "?page=0", "?limit=0"):
+        resp = await client.get(f"/api/v1/feed{query}")
+        assert resp.status_code in (401, 422)

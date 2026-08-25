@@ -637,3 +637,50 @@ async def test_admin_of_another_org_cannot_manage_this_channels_quiz(
     row = (await db.execute(select(Quiz).where(Quiz.id == quiz.id))).scalars().first()
     assert row is not None
     assert row.title == "Form 2 Algebra Quiz"
+
+
+# ── 9B-3: _question_counts as a GROUP BY aggregate ──────────────────────────
+# Guards the specific risk of that refactor: a GROUP BY returns no row for a
+# quiz with zero questions, so the empty quiz must still report 0 rather than
+# dropping out of the map.
+
+@pytest.mark.asyncio
+async def test_list_reports_correct_question_count_per_quiz(db, org, admin_user):
+    empty_quiz = await create_quiz(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        data=_quiz_data(title="Empty"),
+    )
+    one_quiz = await create_quiz(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        data=_quiz_data(title="One"),
+    )
+    two_quiz = await create_quiz(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+        data=_quiz_data(title="Two"),
+    )
+
+    q1 = await _make_published_question(db, org, admin_user)
+    q2 = await _make_published_question(db, org, admin_user)
+    q3 = await _make_published_question(db, org, admin_user)
+
+    await attach_question_to_quiz(
+        request=None, org_id=org.id, quiz_id=one_quiz.id, current_user=admin_user,
+        db_session=db, data=QuizQuestionAttach(question_id=q1.id),
+    )
+    await attach_question_to_quiz(
+        request=None, org_id=org.id, quiz_id=two_quiz.id, current_user=admin_user,
+        db_session=db, data=QuizQuestionAttach(question_id=q2.id),
+    )
+    await attach_question_to_quiz(
+        request=None, org_id=org.id, quiz_id=two_quiz.id, current_user=admin_user,
+        db_session=db, data=QuizQuestionAttach(question_id=q3.id),
+    )
+
+    listed = await list_quizzes(
+        request=None, org_id=org.id, current_user=admin_user, db_session=db,
+    )
+    counts = {q.id: q.question_count for q in listed}
+
+    assert counts[empty_quiz.id] == 0
+    assert counts[one_quiz.id] == 1
+    assert counts[two_quiz.id] == 2

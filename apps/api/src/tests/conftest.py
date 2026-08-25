@@ -512,3 +512,28 @@ def bypass_analytics():
         new_callable=AsyncMock,
     ) as mock:
         yield mock
+
+
+@pytest.fixture(autouse=True)
+def isolated_rate_limit_store(monkeypatch):
+    """Give every test its own in-memory rate-limit store.
+
+    The LearnOrbit limiter (SECURITY_REVIEW F2) runs inside the endpoints under
+    test, so the suite would otherwise depend on whether a Redis happens to be
+    listening: absent in CI (the limiter fails open), present on a developer
+    machine running `npx learnhouse dev` — where the tests would share counters
+    with the live dev instance and accumulate across reruns inside the same
+    window. A fresh store per test makes the outcome the same either way.
+
+    Tests that exercise the limiter install their own store on top of this.
+    """
+    from src.services.security import rate_limiting
+    from src.tests.fixtures.fake_redis import FakeRedis
+
+    # One store for the whole test, so counters still accumulate within it and
+    # a test that genuinely crosses a ceiling still sees the 429.
+    store = FakeRedis()
+    monkeypatch.setattr(rate_limiting, "get_redis_connection", lambda: store)
+    rate_limiting.reset_learnorbit_rate_limit_state()
+    yield store
+    rate_limiting.reset_learnorbit_rate_limit_state()

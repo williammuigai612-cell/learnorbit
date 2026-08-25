@@ -32,7 +32,18 @@ export interface HomeFeedItem {
   channel_type: string
 }
 
-export async function listHomeFeed(access_token: string): Promise<HomeFeedItem[]> {
-  const result = await fetch(`${getAPIUrl()}feed`, RequestBodyWithAuthHeader('GET', null, null, access_token))
+/** Size of the feed window fetched per request (Phase 9B). The endpoint used
+ * to return every video from every followed channel in one response; capped
+ * at the endpoint's own maximum of 100. */
+export const HOME_FEED_LIMIT = 50
+
+export async function listHomeFeed(
+  access_token: string,
+  limit: number = HOME_FEED_LIMIT
+): Promise<HomeFeedItem[]> {
+  const result = await fetch(
+    `${getAPIUrl()}feed?page=1&limit=${limit}`,
+    RequestBodyWithAuthHeader('GET', null, null, access_token)
+  )
   return errorHandling(result)
 }

@@ -160,6 +160,15 @@
   --color-warning: hsl(var(--warning));
   --color-info: hsl(var(--info));
 
+  /* Phase 9C: text-safe companions to --success / --warning. The base tokens
+     are tuned for fills, icons and borders, where the 3:1 non-text floor
+     applies; as small text on a light surface they measure 3.3:1 and 2.2:1
+     and fail WCAG 1.4.3. Use `text-success-strong` / `text-warning-strong`
+     for any *text* in those states, and keep the base tokens for everything
+     else. See docs/DESIGN_SYSTEM.md §3. */
+  --color-success-strong: hsl(var(--success-strong));
+  --color-warning-strong: hsl(var(--warning-strong));
+
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
@@ -378,6 +387,10 @@
     --destructive-foreground: 0 0% 100%;
     --success: 142.1 76.2% 36.3%;
     --warning: 37.7 92.1% 50.2%;
+    /* Text-safe variants (Phase 9C): 5.02:1 and 5.05:1 on --background,
+       against 3.31:1 and 2.16:1 for the base tokens above. */
+    --success-strong: 142.4 71.8% 29.2%;
+    --warning-strong: 26 90.5% 37.1%;
     --info: 191.6 91.4% 36.5%;
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
@@ -438,6 +451,12 @@
     --destructive-foreground: 0 0% 98%;
     --success: 142.1 70.6% 45.3%;
     --warning: 43.3 96.4% 56.3%;
+    /* On dark surfaces the contrast problem inverts: the base tokens are
+       already the readable ones, so the text variants stay light rather than
+       darkening. No dark theme ships in V1 — this keeps the pair coherent for
+       when one does. */
+    --success-strong: 141.9 69.2% 58%;
+    --warning-strong: 45.9 96.7% 64.5%;
     --info: 187.9 85.7% 53.3%;
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;

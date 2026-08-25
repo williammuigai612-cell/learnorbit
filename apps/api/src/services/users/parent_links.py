@@ -166,3 +166,52 @@ async def list_my_parent_links(
         )
     ).scalars().all()
     return list(rows)
+
+
+async def revoke_parent_link(
+    current_user: Union[PublicUser, AnonymousUser],
+    link_uuid: str,
+    db_session: AsyncSession,
+) -> ParentChildLink:
+    """Withdraw an APPROVED parent-child link (Phase 9A security review, F1).
+
+    Either party may revoke. The child withdrawing consent is the case that
+    matters: an APPROVED link grants the parent ongoing, cross-org read access
+    to the child's entire quiz history (`services/users/child_progress.py`),
+    and a grant that can't be withdrawn isn't consent. The parent may also drop
+    a link they no longer need.
+
+    Sets REJECTED rather than introducing a REVOKED enum value: the status
+    already means "not an active grant", so this needs no migration, and it
+    reuses `request_parent_link`'s existing re-open path — restoring the link
+    then requires a fresh request *and* a fresh approval by the child, rather
+    than letting the parent unilaterally undo the revocation.
+    """
+    if isinstance(current_user, AnonymousUser):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    acting_id = resolve_acting_user_id(current_user)
+
+    link = (
+        await db_session.execute(
+            select(ParentChildLink).where(ParentChildLink.link_uuid == link_uuid)
+        )
+    ).scalars().first()
+    if not link:
+        raise HTTPException(status_code=404, detail="Link not found")
+    # SECURITY: IDOR guard — only the two parties to the link may revoke it,
+    # and 404 (not 403) so a caller who isn't one of them can't distinguish
+    # "not yours" from "doesn't exist". Same choice as
+    # _get_own_pending_link_or_404 and child_progress._require_approved_link.
+    if acting_id not in (link.parent_user_id, link.child_user_id):
+        raise HTTPException(status_code=404, detail="Link not found")
+    if link.status != ParentChildLinkStatusEnum.APPROVED:
+        # A PENDING request is declined through respond_to_parent_link;
+        # revocation is specifically for withdrawing an existing grant.
+        raise HTTPException(status_code=400, detail="Link is not approved")
+
+    link.status = ParentChildLinkStatusEnum.REJECTED
+    link.update_date = _now()
+    db_session.add(link)
+    await db_session.commit()
+    await db_session.refresh(link)
+    return link

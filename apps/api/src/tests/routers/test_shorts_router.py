@@ -104,3 +104,67 @@ async def test_excludes_long_form_video(db, org, admin_user, course, client):
     resp = await client.get("/api/v1/shorts")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+# ── Pagination at the HTTP boundary (Phase 9B) ──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_limit_is_honoured_over_http(db, org, admin_user, course, client):
+    for i in range(4):
+        await _create_video(db, org, admin_user, course, f"pg{i}", content_format="short")
+
+    resp = await client.get("/api/v1/shorts?page=1&limit=2")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
+
+
+@pytest.mark.asyncio
+async def test_second_page_returns_the_remainder(db, org, admin_user, course, client):
+    for i in range(3):
+        await _create_video(db, org, admin_user, course, f"pgr{i}", content_format="short")
+
+    first = await client.get("/api/v1/shorts?page=1&limit=2")
+    second = await client.get("/api/v1/shorts?page=2&limit=2")
+    assert len(first.json()) == 2
+    assert len(second.json()) == 1
+    first_ids = {v["id"] for v in first.json()}
+    assert all(v["id"] not in first_ids for v in second.json())
+
+
+@pytest.mark.asyncio
+async def test_rejects_limit_above_the_maximum(client):
+    """max 100 per page — a data-dumping guard, same convention as the
+    existing paginated orgs endpoints."""
+    resp = await client.get("/api/v1/shorts?limit=101")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_rejects_non_positive_page_and_limit(client):
+    assert (await client.get("/api/v1/shorts?page=0")).status_code == 422
+    assert (await client.get("/api/v1/shorts?limit=0")).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_omitting_pagination_params_still_works(db, org, admin_user, course, client):
+    """No params — the Phase 3C request shape — must keep working."""
+    short = await _create_video(db, org, admin_user, course, "noparam", content_format="short")
+    resp = await client.get("/api/v1/shorts")
+    assert resp.status_code == 200
+    assert [v["id"] for v in resp.json()] == [short.id]
+
+
+@pytest.mark.asyncio
+async def test_pagination_never_exposes_a_draft_or_unlisted_short(
+    db, org, admin_user, course, client
+):
+    """SECURITY (9A): the published+public predicate holds on every page."""
+    published = await _create_video(db, org, admin_user, course, "secpub", content_format="short")
+    await _create_video(db, org, admin_user, course, "secdraft", publish=False, content_format="short")
+    await _create_video(
+        db, org, admin_user, course, "secunl", content_format="short", visibility="unlisted"
+    )
+
+    resp = await client.get("/api/v1/shorts?page=1&limit=100")
+    assert resp.status_code == 200
+    assert [v["id"] for v in resp.json()] == [published.id]
