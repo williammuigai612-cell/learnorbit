@@ -455,9 +455,11 @@ describe('CLI integration — live install (command coverage)', () => {
 
 describe('CLI integration — upgrade (old → new image)', () => {
   // 1.0.1 is the oldest stable GHCR tag carrying alembic migrations; upgrading
-  // to latest applies the full delta of migrations.
+  // to 1.3.4 applies the full delta of migrations. Pinned (not `latest`) so the
+  // upstream compatibility surface stays deterministic: `latest` moves, and
+  // newer tags cannot boot against a 1.0.1 database.
   const OLD_VERSION = '1.0.1'
-  const NEW_VERSION = 'latest'
+  const NEW_VERSION = '1.3.4'
   const GHCR = 'ghcr.io/learnhouse/app'
 
   let home: string
@@ -527,7 +529,7 @@ describe('CLI integration — upgrade (old → new image)', () => {
 
   describe('upgrade to the new image', () => {
     it('update --migrate exits 0', () => {
-      const r = cli('update --no-backup --migrate', 600_000)
+      const r = cli(`update --to ${NEW_VERSION} --no-backup --migrate`, 600_000)
       if (r.exitCode !== 0) console.error('update:', r.stdout, r.stderr)
       expect(r.exitCode).toBe(0)
     }, 600_000)
@@ -596,7 +598,7 @@ describe('CLI integration — upgrade (old → new image)', () => {
     })
 
     it('--no-migrate re-upgrades but skips alembic, printing instructions', () => {
-      const r = cli('update --no-backup --no-migrate', 300_000)
+      const r = cli(`update --to ${NEW_VERSION} --no-backup --no-migrate`, 300_000)
       expect(r.exitCode).toBe(0)
       expect(r.stdout).toContain('alembic')
     }, 300_000)
@@ -621,7 +623,7 @@ describe('CLI integration — upgrade (old → new image)', () => {
       const backupsDir = path.join(installDir, 'backups')
       const before = preUpgrade(backupsDir).length
 
-      const r = cli('update --no-migrate', 600_000) // default backup ON; already at head
+      const r = cli(`update --to ${NEW_VERSION} --no-migrate`, 600_000) // default backup ON; already at head
       if (r.exitCode !== 0) console.error('update:', r.stdout, r.stderr)
       expect(r.exitCode).toBe(0)
 
