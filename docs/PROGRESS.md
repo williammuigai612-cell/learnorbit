@@ -5474,3 +5474,63 @@ No commit, no push, no tag, nothing published or deployed.
 
 - **Next**: commit this increment, then a live smoke test of login/signup/logout against a deployment
   running the registered middleware.
+
+## CI — Alembic single-head gate on `api-tests.yaml` (2026-08-26)
+
+The §11.3 preflight listed "no Alembic head check" among the CI gaps blocking a deployment gate (§9F
+finding 7). This closes that one gap, in the workflow that already installs the API's dependencies.
+
+### CI
+
+- **`.github/workflows/api-tests.yaml`** — new blocking step **"Check for a single Alembic head"**,
+  placed after `Install dependencies` (`uv sync`) and before `Run tests with coverage`, so it reuses the
+  already-synced environment: no second `uv sync`, no new workflow, no new dependency. It runs
+  `uv run alembic heads` in `apps/api`, echoes the full output under an `Alembic heads:` header, counts
+  the `(head)` lines, and fails with a `::error::` annotation when the count is anything other than 1.
+  `alembic heads` reads the revision files only — no database is required, which is why the step can sit
+  ahead of the test run.
+
+  **No revision id is hardcoded.** The gate is a count, so it catches any future branching rather than
+  drift away from one known id. `grep -c` is guarded with `|| true` so a zero-head graph reports its own
+  error message instead of tripping the runner's `bash -e` first.
+
+- **Trigger** — `push` now covers `learnorbit-v1` alongside `dev`. Without it the gate would never run on
+  the active branch, only on PRs. `paths: apps/api/**` and the `pull_request` trigger are unchanged, as
+  is the `concurrency` block (pushes still always finish; only PR runs cancel in progress).
+
+### Files
+
+- **Changed:** `.github/workflows/api-tests.yaml`, `docs/PROGRESS.md` (this entry)
+- **No migration, application source, test, release workflow, Docker, tag or deployment file was touched.**
+
+### Verification
+
+- **`uv run alembic heads` in `apps/api`, executed in WSL** → `b7e4f1a92c83 (head)` — **exactly one head**,
+  confirming live what §9F could only derive by parsing the revision files (that entry's Limitations asked
+  for exactly this check). No database connection was needed.
+- **Workflow YAML parsed** (`yaml.safe_load`) → valid; triggers resolve to
+  `push.branches = [dev, learnorbit-v1]`, and the step order is `… Install dependencies → Check for a
+  single Alembic head → Run tests with coverage → …`. `actionlint` is not installed in this environment.
+- **Gate shell logic exercised against synthetic `alembic heads` output**: one head → pass; two heads →
+  exit 1 with `found 2`; zero heads → exit 1 with `found 0`; a branch-labelled head
+  (`<rev> (mybranch) (head)`) → pass. Same snippet as the workflow, run under `bash -e`.
+- **`git diff --check`** → clean.
+- Full diff reviewed: **two hunks only** — the added `learnorbit-v1` trigger line and the 15-line step.
+
+### Limitations
+
+- **Not observed running on GitHub Actions** — the gate has not yet executed on a real runner; it is
+  verified by local execution of the same command plus simulation of the same shell. First live proof
+  comes with the next push touching `apps/api/**`.
+- **The API test suite and `ruff` were not re-run** — this increment changes no Python file, so the
+  previous entry's results stand.
+- No browser verification, and none applicable — CI-only change, no UI.
+- **`release.yaml` is deliberately not wired to this gate.** §11.3 keeps that a separate increment; a
+  release still does not verify the migration graph.
+
+### Git
+
+No commit, no push, no tag.
+
+- **Next**: wire the single-head check (or a migration smoke test) into `release.yaml`, so a release
+  cannot ship a branched migration graph.

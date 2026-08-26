@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - dev
+      - learnorbit-v1
     paths:
       - "apps/api/**"
   pull_request:
@@ -44,6 +45,21 @@ jobs:
 
       - name: Install dependencies
         run: uv sync
+        working-directory: apps/api
+
+      - name: Check for a single Alembic head
+        # Two heads mean two branches of the migration graph each claim to be
+        # the latest, and `alembic upgrade head` fails on deploy. Catch the
+        # split here. Which revision is on top doesn't matter — the count does.
+        run: |
+          heads=$(uv run alembic heads)
+          echo "Alembic heads:"
+          echo "$heads"
+          count=$(printf '%s\n' "$heads" | grep -c '(head)' || true)
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected exactly 1 Alembic head, found $count. Merge the migration branches back into a single head."
+            exit 1
+          fi
         working-directory: apps/api
 
       - name: Run tests with coverage
