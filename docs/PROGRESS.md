@@ -5534,3 +5534,56 @@ No commit, no push, no tag.
 
 - **Next**: wire the single-head check (or a migration smoke test) into `release.yaml`, so a release
   cannot ship a branched migration graph.
+
+## CI — Alembic single-head gate proven on a GitHub runner (2026-08-26)
+
+The gate added in `02c90a48` has now executed on GitHub Actions and passed. This **supersedes the
+"Not observed running on GitHub Actions" limitation** in the previous entry.
+
+### What it took to run it at all
+
+`api-tests.yaml` filters **both** `push` and `pull_request` on `paths: apps/api/**`, so the commit that
+added the gate — a workflow file and a doc — could not trigger the workflow that contains it, and neither
+could a PR. `gh api …/api-tests.yaml/runs` returned `total_count: 0`: **API Tests had never run in this
+repository**, on any branch.
+
+- **`.github/workflows/api-tests.yaml`** — added `workflow_dispatch:` to `on:` (commit `ca82a845`). Chosen
+  over widening `paths` because it leaves both automatic triggers exactly as they were and makes the gate
+  re-provable on demand. Dispatch works here because `learnorbit-v1` *is* the repository default branch;
+  on a repo whose default branch lacked the trigger, the same dispatch would 422.
+
+### Verification — run 32980506419 (`workflow_dispatch`, head `ca82a845`)
+
+- **`Check for a single Alembic head` → success.** Step log:
+  `Alembic heads:` / `b7e4f1a92c83 (head)`. The step ran under `/usr/bin/bash -e {0}` after
+  `Install dependencies` and before `Run tests with coverage`, exactly as placed, with **no database
+  available** — confirming the step needs only the revision files.
+- **`Run tests with coverage` → success**: `5798 passed, 23 skipped, 201 warnings in 473.66s`;
+  `TOTAL 29273 837 97%`; `Required test coverage of 25% reached. Total coverage: 97.14%`.
+- Every other step succeeded: checkout, Set up Python (3.14.7), Install uv, Install ffmpeg,
+  Install dependencies, Upload coverage report.
+
+### Failure found, pre-existing and unrelated
+
+- **`Upload API coverage to Codecov` → failure**, which makes the overall run red:
+  `Token length: 0` → `Upload queued for processing failed: {"message":"Token required - not valid
+  tokenless upload"}` → `Failed to run upload-coverage`. **No `CODECOV_TOKEN` secret exists in this fork**
+  and the step sets `fail_ci_if_error: true`, so the step fails closed.
+- This is inherited configuration this increment did not touch, and it means **API Tests will report
+  failure on every run until a token is added** (or `fail_ci_if_error` is relaxed) — the gate and the test
+  suite both pass underneath it. **Left unfixed deliberately**: out of this increment's scope.
+
+### Files
+
+- **Changed:** `.github/workflows/api-tests.yaml` (`workflow_dispatch`), `docs/PROGRESS.md` (this entry)
+- No migration, application source, test, release workflow, Docker, tag or deployment file was touched.
+  Nothing was tagged, published or deployed.
+
+### Git
+
+- `02c90a48` — the gate and the `learnorbit-v1` push trigger.
+- `ca82a845` — `workflow_dispatch`, pushed; `origin/learnorbit-v1` matches HEAD.
+
+- **Next**: decide the Codecov token question (add the secret, or stop failing CI on upload error), since
+  it currently masks the pass/fail signal of every API Tests run. Then wire the single-head check into
+  `release.yaml`.
