@@ -5244,10 +5244,14 @@ node_modules/.bin/vitest run tests/integration.test.ts -t "upgrade \(old"
 
 - A full `test:integration` on a slow or loaded machine can still exceed `start_period: 60s`. Pre-pull the
   images or run the sections separately; CI budgets 45 minutes for the job.
-- `--to with a nonexistent version fails clearly without touching the install` **passes locally** but
-  failed in CI run `32895836468` on the `toContain('not found')` assertion at `integration.test.ts:603`.
-  The exit-code half passed there and the CLI printed the correct refusal, so this looks like a
-  difference in docker's error text between environments — open, unexamined, and deliberately untouched.
+- ~~`--to with a nonexistent version fails clearly without touching the install` passes locally but
+  failed in CI…~~ **RESOLVED (fe24e355).** The cause was as suspected: the assertion matched
+  `'not found'`, which comes from *docker's* error text, and that differs by daemon/registry version —
+  locally `manifest tagged "..." not found`, in Actions `manifest unknown`. The CLI behaved identically in
+  both. The test now asserts only text this project controls (`/refusing to update/i`) plus the guarantee
+  its own name makes and previously never checked: the compose file is byte-identical afterwards, does not
+  contain the bad tag, and the running container's image is unchanged. Verified green in **CI run
+  `32957679321`** — Unit Tests **681/681**, Integration Tests **62/62**, including that test.
 - `cli-tests.yaml` has a `paths:` filter but no ref filter, so pushing a `lo-` tag also starts a CLI Tests
   run. It publishes nothing.
 - Section 3 was not re-run after the full-suite attempt, where it passed 8/8.
