@@ -129,6 +129,19 @@ function appendClearAuthCookies(response: NextResponse, request: NextRequest) {
 // requests that reach the API directly.
 const CLIENT_IDENTITY_HEADERS = ['x-forwarded-for', 'x-real-ip', 'user-agent']
 
+// Headers that prove WHERE the request came from, relayed untouched.
+//
+// This proxy builds its outbound headers from scratch, so without these the API
+// sees every auth mutation — login, refresh, logout — with neither Origin nor
+// Referer. The API's CSRF middleware refuses exactly that, which would 403 the
+// entire authentication flow.
+//
+// The browser's own value is forwarded, never a synthesised one: Origin is set
+// by the browser and cannot be spoofed by a cross-site page, which is the only
+// reason the check means anything. A request that genuinely arrives without
+// either header is passed through unchanged, so the API still refuses it.
+const ORIGIN_CONTEXT_HEADERS = ['origin', 'referer']
+
 async function proxyRequest(
   request: NextRequest,
   method: string
@@ -173,6 +186,12 @@ async function proxyRequest(
     if (value) headers[name] = value
   }
 
+  // Relay the caller's origin context so the API's CSRF check can see it.
+  for (const name of ORIGIN_CONTEXT_HEADERS) {
+    const value = request.headers.get(name)
+    if (value) headers[name] = value
+  }
+
   // Forward cookies to backend
   const accessToken = cookieStore.get(ACCESS_TOKEN_COOKIE)
   const refreshToken = cookieStore.get(REFRESH_TOKEN_COOKIE)
@@ -211,6 +230,14 @@ async function proxyRequest(
       const logoutHeaders: HeadersInit = {}
       if (refreshToken?.value) {
         logoutHeaders['Cookie'] = `${REFRESH_TOKEN_COOKIE}=${refreshToken.value}`
+      }
+      // Same origin context as the main proxy path. Without it this DELETE 403s
+      // — and because backend logout is best-effort, it would fail SILENTLY:
+      // cookies still clear, the user sees a clean logout, and the server-side
+      // session is never revoked.
+      for (const name of ORIGIN_CONTEXT_HEADERS) {
+        const value = request.headers.get(name)
+        if (value) logoutHeaders[name] = value
       }
       // Backend logout is DELETE /auth/logout — using POST returned 405 and
       // silently skipped server-side session revocation, so revoked tokens

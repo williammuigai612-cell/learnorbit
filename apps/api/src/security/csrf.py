@@ -30,6 +30,50 @@ _CUSTOM_DOMAIN_TTL_SECONDS = 60.0
 _CUSTOM_DOMAIN_CACHE_MAX = 2048
 
 
+
+def warn_if_origins_unscoped(config=None) -> bool:
+    """Report a production deployment whose CSRF origin allowlist admits anything.
+
+    The shipped ``allowed_regexp`` (config.yaml) is a catch-all that fullmatches
+    any well-formed origin, and the CLI's generated .env sets neither
+    LEARNHOUSE_ALLOWED_REGEXP nor LEARNHOUSE_ALLOWED_ORIGINS. Registering the
+    middleware against that config protects nothing — and does so silently,
+    which is the worst outcome: the deployment looks hardened.
+
+    Returns True when the configuration is unsafe. Logs CRITICAL rather than
+    raising: an existing deployment that inherited the catch-all must not be
+    bricked by an upgrade, and a 403 on every mutation is a worse failure than a
+    loud log. Called from app.py at registration, NOT from the middleware's
+    __init__ — Starlette builds its middleware stack lazily, so work done in
+    __init__ would first run on the first request rather than at startup.
+
+    Scope check is delegated to the email layer's ``_is_scoped_origin_regexp``,
+    which already probes a pattern with canary hosts. Imported lazily: that
+    module pulls in smtplib/resend, and it imports from this one.
+    """
+    config = config or get_learnhouse_config()
+    if config.general_config.development_mode:
+        return False
+
+    allowed_regexp = config.hosting_config.allowed_regexp
+    if not allowed_regexp:
+        return False
+
+    from src.services.email.utils import _is_scoped_origin_regexp
+
+    if _is_scoped_origin_regexp(allowed_regexp):
+        return False
+
+    logger.critical(
+        "CSRF origin allowlist is unscoped: allowed_regexp %r matches arbitrary "
+        "hosts, so every cross-site origin is accepted and CSRF protection is "
+        "INERT. Set LEARNHOUSE_ALLOWED_REGEXP to an anchored, domain-scoped "
+        "pattern for this deployment (and LEARNHOUSE_ALLOWED_ORIGINS for exact "
+        "origins). SameSite=Lax cookies remain the active control until then.",
+        allowed_regexp,
+    )
+    return True
+
 class CSRFProtectionMiddleware(BaseHTTPMiddleware):
     """
     Middleware that validates Origin header on state-changing requests.

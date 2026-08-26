@@ -24,6 +24,7 @@ from src.core.ee_hooks import register_ee_middlewares
 from src.core.events.events import shutdown_app, startup_app
 from src.core.middleware.cors import configure_cors
 from src.router import v1_router
+from src.security.csrf import CSRFProtectionMiddleware, warn_if_origins_unscoped
 from src.routers.content_files import router as content_files_router
 from src.routers.local_content import router as local_content_router
 
@@ -141,6 +142,17 @@ configure_cors(app)
 # compresslevel 9 costs several times the CPU of 6 for a couple of percent on
 # JSON; 6 is gzip's own default.
 app.add_middleware(SelectiveGZipMiddleware, minimum_size=1000, compresslevel=6)
+# Origin validation on POST/PUT/PATCH/DELETE. Registered here rather than via the
+# EE hook so it applies in every mode, LEARNHOUSE_SAAS included (where
+# register_ee_middlewares returns early). `add_middleware` PREPENDS, so this runs
+# OUTSIDE CORS: a rejected cross-origin mutation is refused before CORS headers
+# are attached, and the browser sees an opaque CORS failure rather than the 403.
+# Deliberate — a legitimate origin is allowed and never reaches that path.
+#
+# The middleware is only as good as the origin allowlist; the guard reports a
+# production config that still admits everything (docs/DEPLOYMENT_PLAN.md §15.3).
+warn_if_origins_unscoped()
+app.add_middleware(CSRFProtectionMiddleware)
 register_ee_middlewares(app)
 
 # Lifecycle

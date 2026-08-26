@@ -5260,3 +5260,213 @@ Committed on `learnorbit-v1` as *docs: record lo-1.0.1 release verification*. Ta
 - **Next**: `APP_IMAGE_VERSION` and the published image now agree at 1.0.1, so the deployment path is
   usable end to end. The queued code increment is **CSRF middleware registration**
   (`docs/DEPLOYMENT_PLAN.md` §15.6).
+
+---
+
+## CSRF middleware registration — read-only preflight (2026-08-26)
+
+No code written. This is the analysis that must precede the queued increment
+(`docs/DEPLOYMENT_PLAN.md` §15.6). It **corrects two prerequisites in §15 that are factually wrong**, and
+finds a breaking path §15 missed that is large enough to change the shape of the increment.
+
+### Confirmed as documented
+
+- **Registration point.** `apps/api/app.py:131-137` — `configure_cors(app)`, `SelectiveGZipMiddleware`,
+  `register_ee_middlewares(app)` (a no-op here: `apps/api/ee` does not exist in this checkout).
+- **The middleware is complete and unregistered.** `src/security/csrf.py` validates `Origin` (falling back
+  to `Referer`) on `POST/PUT/DELETE/PATCH`, 403s otherwise, with a verified-custom-domain DB fallback.
+  Exempt: `Bearer lh_*`, `stripe-signature`, `x-internal-key`, `x-platform-key`. Plain `Bearer <jwt>` is
+  deliberately **not** exempt, because `extract_jwt_from_request` (`security/auth.py:85`) falls back to the
+  `LH_access` cookie — so exempting it would let a junk Bearer header bypass CSRF while the victim's cookie
+  did the real authentication.
+- **Cookies are genuinely in play**, so CSRF is a real (defence-in-depth) gap: the browser client sends
+  `credentials: 'include'` on every request.
+- **The catch-all still makes it inert.** `config.yaml:44` ships
+  `\b((?:https?://)[^\s/$.?#].[^\s]*)\b`, which `fullmatch`es any well-formed origin;
+  `allowed_origins` is empty; `development_mode: false`. Registering without scoping protects nothing.
+- **No new dependency** — Starlette `BaseHTTPMiddleware`, already present.
+
+### Correction 1 — the test-suite prerequisite does not exist
+
+§15.3 predicts "near-total suite failure" from 475 mutation calls and §15.6 item 2 makes a `conftest.py`
+`Origin` fixture a prerequisite. Both are wrong.
+
+**Zero test files import the real `app.py`**; there is no `TestClient(` anywhere in `apps/api/src/tests`.
+64 files build their own bare `FastAPI()` and mount only the routers under test, driven through
+`httpx.ASGITransport`. None of the 507 mutation calls traverses `app.py`'s middleware stack, so
+registration cannot break them.
+
+The flip side is the real prerequisite: **there is no app-level coverage of the middleware stack at all.**
+`src/tests/security/test_csrf.py` has 36 tests, every one against a bare `CSRFProtectionMiddleware(MagicMock())`.
+`test_email_origin_and_smtp_tls.py:235` is the ASGITransport pattern to copy.
+
+### Correction 2 — `allowed_regexp` does not scope CORS in V1
+
+§15.5 states that scoping `LEARNHOUSE_ALLOWED_REGEXP` is highest-value because it scopes CORS, email links
+*and* CSRF. Under `tenancy: single` — the V1 deployment — it does **not** touch CORS.
+`get_cors_origin_regex()` (`core/middleware/cors.py`) builds its regex from `frontend_domain`/`domain` plus
+localhost and only reads `allowed_regexp` in `multi` mode. CORS is already scoped; the config change buys
+CSRF and email links.
+
+### Correction 3 — four breaking callers, not one
+
+§15.6 item 5 pointed at `app/api/billing/*` and `app/api/loops/*`. Neither issues a non-GET to the API. A
+full sweep of `apps/web` (168 files referencing an API base URL, classified by
+`getAPIUrl()` browser vs `getServerAPIUrl()` server, following `RequestBodyWithAuthHeader` /
+`platformHeaders` to the real request) found:
+
+| Caller | Method(s) | Why it 403s | Severity |
+|---|---|---|---|
+| **`app/api/auth/[...path]/route.ts`** | POST/PUT/PATCH/DELETE | Builds headers from scratch (`:144`), forwarding only `x-forwarded-for`, `x-real-ip`, `user-agent`, `Content-Type`, `Authorization`, `Cookie`. **Origin/Referer never forwarded** | **Critical — breaks `POST /auth/login` and `/auth/refresh`; authentication stops working** |
+| `app/api/auth/[...path]/route.ts:219` | DELETE `/auth/logout` | Only a `Cookie` header | **Silent** — `.catch(() => null)` means logout still "succeeds" while server-side session revocation stops; revoked tokens live to expiry |
+| `services/payments/*` (4 files, **19 calls**) | POST/PUT/DELETE | `'use server'` actions; `RequestBodyWithAuthHeader` sets only `Content-Type` + `Authorization: Bearer <jwt>`, which is not exempt | High |
+| `app/api/signup/route.ts:130` | POST | Only `Content-Type` | High — account creation |
+
+Safe, verified: every `services/**` module using `getAPIUrl()` (~50 files with non-GET verbs) runs in the
+browser via `'use client'` importers and carries a real `Origin`; `services/billing/packs.ts` (×4) is
+exempt via `x-platform-key`; `services/billing/orgPlan.ts:31` via `X-Internal-Key`; the
+`/api/v1/[...path]` proxy forwards all non-hop-by-hop headers; collab uses `X-Internal-Key`; Stripe uses
+`stripe-signature`; `lib/turnstile.ts` targets Cloudflare, not the API.
+
+### Ordering note not in §15
+
+Starlette's `add_middleware` **prepends**, so the last-registered middleware is the **outermost**.
+Registering CSRF after `configure_cors` puts it outside CORS, so a rejected cross-origin POST returns 403
+**without** CORS headers and the browser reports an opaque CORS error rather than a readable 403. Only
+affects error legibility, but it should be a decision, not an accident. Not verified empirically — worth
+one assertion in the new tests.
+
+### Revised scope for the increment
+
+1. Register the middleware in `app.py`.
+2. **Forward `Origin` in the auth proxy** (`route.ts:171` and the logout path at `:219`) — without this,
+   login breaks. This is the item that must not be missed.
+3. Fix `app/api/signup/route.ts:130`.
+4. Give `services/payments/*` a **server-side-only** header helper. Do *not* add `Origin` to
+   `RequestBodyWithAuthHeader` — it is shared with browser code, where `Origin` is a forbidden header name
+   that fetch silently drops.
+5. Scope `LEARNHOUSE_ALLOWED_REGEXP` / `LEARNHOUSE_ALLOWED_ORIGINS`, and add a startup guard that logs
+   `CRITICAL` when `development_mode` is false and the regexp is the catch-all — reuse
+   `_is_scoped_origin_regexp` (`services/email/utils.py:48`). The CLI's `env.ts` emits neither variable.
+6. App-level tests (ASGITransport): cross-origin POST → 403, same-origin → pass, no-Origin → 403, GET
+   unaffected, `Bearer lh_*` exempt, and the CORS/CSRF wrapping order.
+7. Name the behaviour change: registering in `app.py` rather than the EE hook applies CSRF under
+   `LEARNHOUSE_SAAS=true`, where `register_ee_middlewares` returns early.
+
+### Limitations
+
+- `docs/DEPLOYMENT_PLAN.md` §15 still contains the two superseded claims (test-suite blocker, CORS
+  coupling) and the wrong breaking-caller directories. Left unedited — it should be corrected as part of
+  the implementation increment, not by a preflight.
+- Not traced end to end: the Google OAuth callback and `login/mfa`, to confirm neither reaches the API
+  outside the audited proxy. `apps/e2e` was not audited for direct (non-browser) API calls.
+- Node's fetch permits setting `Origin` server-side where browsers forbid it; the payments fix depends on
+  that distinction and deserves an explicit test rather than trust in the runtime.
+- `apps/api`'s own outbound calls were out of scope.
+
+### Git
+
+No code, config, or workflow changed. No commit for this entry yet; no tag, publish or deploy.
+
+- **Next**: implement the increment with items 1-7 above landing together — item 2 is the one that turns a
+  one-line registration into a safe change.
+
+---
+
+## CSRF middleware registration — implemented (2026-08-26)
+
+`CSRFProtectionMiddleware` is registered. The four server-side callers the preflight found are fixed in
+the same change, because any one of them left unfixed turns registration into an outage.
+
+### API
+
+- **`apps/api/app.py`** — `app.add_middleware(CSRFProtectionMiddleware)` between `configure_cors(app)` and
+  `register_ee_middlewares(app)`. Unconditional, so it applies under `LEARNHOUSE_SAAS=true` too, where
+  `register_ee_middlewares` returns early.
+- **`apps/api/src/security/csrf.py`** — new `warn_if_origins_unscoped(config=None)`. In non-development
+  mode it delegates to `_is_scoped_origin_regexp` (`services/email/utils.py`, imported lazily — that
+  module pulls in smtplib/resend and imports back from `csrf`) and logs **CRITICAL** when the configured
+  `allowed_regexp` still matches arbitrary hosts. It logs rather than raising: a deployment that inherited
+  the catch-all must not be bricked by an upgrade, and 403 on every mutation is the worse failure.
+
+  It is a module-level function called from `app.py`, **not** work inside `__init__` — Starlette builds
+  the middleware stack lazily, so a check in `__init__` first runs on the first request, not at startup.
+  That is also why the app-level tests hold the config patch across the request, not just registration.
+
+### Web — the callers that would have 403'd
+
+- **`app/api/auth/[...path]/route.ts`** — the proxy builds outbound headers from scratch, so Origin and
+  Referer never reached the API: `POST /auth/login` and `/auth/refresh` would have 403'd, i.e. no
+  authentication at all. New `ORIGIN_CONTEXT_HEADERS` relays both on the main path and on the logout
+  `DELETE` (whose failure was worse for being silent — best-effort, so cookies still cleared and
+  server-side revocation just stopped). The caller's own value is relayed, never a synthesised one:
+  Origin is browser-set and unspoofable cross-site, which is the only thing that makes the check mean
+  anything. A request with neither header is passed through unchanged, so the API still refuses it.
+- **`app/api/signup/route.ts`** — same relay on its server-side POST.
+- **`services/config/serverOrigin.ts`** (new) — `getServerOrigin()` / `withServerOrigin(init)`, derived
+  from the existing `NEXT_PUBLIC_LEARNHOUSE_HTTPS`/`_DOMAIN` config. No new env var, no hardcoded domain.
+- **`services/payments/{payments,groups,offers,providers/stripe}.ts`** — all **19** non-GET server-action
+  calls wrapped in `withServerOrigin(...)`. `RequestBodyWithAuthHeader` is deliberately **unchanged**: it
+  is shared with browser code, where `Origin` is a forbidden header name that fetch silently drops, so
+  setting it there would be dead code that reads as protection. `import 'server-only'` makes misuse from
+  a client bundle a build error.
+
+### CLI
+
+- **`apps/cli/src/templates/env.ts`** — generated `.env` now sets `LEARNHOUSE_ALLOWED_ORIGINS` (the
+  deployment base URL) and `LEARNHOUSE_ALLOWED_REGEXP` (anchored, dots escaped, optional subdomain and
+  port), both derived from the operator's configured domain. Without this a generated install inherits
+  the catch-all and gets CSRF that accepts every origin. No domain is invented.
+
+### Tests
+
+| Suite | Added | Result |
+|---|---|---|
+| `apps/api/src/tests/security/test_csrf_app_level.py` (new) | 21 | 57 pass with the 36 existing `test_csrf.py` — none of which was modified |
+| `apps/web/tests/csrf-origin-forwarding.test.mjs` (new) | 14 | pass |
+| `apps/web/tests/auth-proxy-origin.test.mjs` (new) | 7 | pass |
+| `apps/web/tests/signup-origin.test.mjs` (new) | 3 | pass |
+| `apps/cli/tests/unit.test.ts` (extended) | 6 | 681/681 pass (was 675) |
+
+App-level coverage: same-origin POST passes, cross-origin 403, no-Origin/Referer 403, Referer fallback,
+GET unaffected, `Bearer lh_*` / `x-internal-key` / `x-platform-key` exempt, plain `Bearer <jwt>` **not**
+exempt, verified vs unverified custom domain, CORS preflight not blocked, and the ordering contract —
+CSRF is outermost, so a rejected cross-origin 403 carries no CORS headers while an allowed origin still
+gets them. Plus a source contract on `app.py` (registered, positioned, unconditional, guard called) and on
+`services/payments/*` (no unwrapped non-GET call can be added later without failing).
+
+RED was proven before each implementation step: the API tests failed on import (`warn_if_origins_unscoped`
+absent) and 8 behavioural assertions failed before registration.
+
+### Verification
+
+- API full suite: **5782 passed, 10 failed, 29 skipped**, coverage 96.47%. The 10 are **pre-existing and
+  unrelated** — 9 reproduce when run in isolation, and none of the five files
+  (`test_core_events*`, `test_custom_domains_service`, `test_org_invites_service`, `test_podcasts_service`)
+  references `csrf`, `app.py` or the new guard. A clean-tree baseline of the *full* suite was not run.
+- Web `bun test tests`: **281 pass**. The failing set is **byte-identical with and without the three new
+  files** (verified by diffing sorted failure lists) — all pre-existing, in the billing internal-key /
+  platformApiKey suites, a missing-module import, and a flaky i18n timeout. `bun test tests` is not run by
+  CI (§11.2).
+- CLI suite: **681/681**, 15 files.
+- `ruff` (pinned 0.15.9) on the three changed Python files: **All checks passed**.
+- `bun run lint:strict` on the seven changed web files: **0 errors**, 2 pre-existing `no-console` warnings.
+- `git diff --check`: exit 0.
+
+### Limitations
+
+- `tsc --noEmit` was not run on `apps/web` — the repo has no typecheck gate there and carries known
+  pre-existing type debt (§11.2). The changed files compile under bun/vitest.
+- Not exercised end to end against a live stack: no browser login was performed against a registered
+  middleware. The behaviour is covered at the middleware and caller level only.
+- The Google OAuth callback and `login/mfa` were not traced end to end to confirm they reach the API only
+  through the audited proxy.
+- The guard logs CRITICAL; it does not fail startup. A deployment that ignores the log still runs with
+  CSRF accepting every origin, with `SameSite=Lax` as the active control (§15.4).
+
+### Git
+
+No commit, no push, no tag, nothing published or deployed.
+
+- **Next**: commit this increment, then a live smoke test of login/signup/logout against a deployment
+  running the registered middleware.

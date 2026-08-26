@@ -864,10 +864,12 @@ unscoped. The CLI's generated `.env` never sets `LEARNHOUSE_ALLOWED_REGEXP` or `
 
 **And it would break things.** Any state-changing request with neither `Origin` nor `Referer` gets a 403:
 
-* **The test suite:** **475 mutation calls across 53 files** under `apps/api/src/tests`. `TestClient` sends
-  no `Origin` by default, and only 14 lines in the whole suite set one (mostly CORS/email-origin tests).
-  With `TESTING=true` the middleware's `development_mode` localhost escape hatch is also off, since
-  `config.yaml` sets `development_mode: false` and tests do not override it. Near-total suite failure.
+* ~~**The test suite:** **475 mutation calls across 53 files**… Near-total suite failure.~~
+  **SUPERSEDED — this never applied.** No test file imports `app.py`; there is no `TestClient(` anywhere in
+  the suite. Every file builds its own bare `FastAPI()` and drives it through `httpx.ASGITransport`, so no
+  mutation call traverses `app.py`'s middleware stack. Verified when the increment landed: the full suite
+  is unchanged by registration. The real gap was the inverse — registration had *no* coverage — closed by
+  `src/tests/security/test_csrf_app_level.py`.
 * **Non-browser JWT clients** — curl, scripts, ops tooling — since only `lh_*` tokens are exempt.
 * **Server-side fetches from Next.js** that construct their own requests rather than forwarding browser
   headers. The `/api/v1/[...path]` proxy forwards `Origin` correctly, but the `app/api/billing/*` and
@@ -891,15 +893,25 @@ configuration.
 ### 15.5 What 9F does instead
 
 1. **Scoping `LEARNHOUSE_ALLOWED_REGEXP` and `LEARNHOUSE_ALLOWED_ORIGINS` is now a mandatory
-   pre-deployment step** (§3.2, §7.3, §13.1 step 3, §16). This is the highest-value action available
-   because that one value already scopes **CORS**, **email link generation**, *and* — once registered —
-   **CSRF**. Today it materially tightens CORS on its own.
+   pre-deployment step** (§3.2, §7.3, §13.1 step 3, §16). It scopes **email link generation** and —
+   once registered — **CSRF**. **CORRECTION:** it does *not* scope CORS under `tenancy: single`, the V1
+   deployment: `get_cors_origin_regex()` builds its regex from `frontend_domain`/`domain` plus localhost
+   and only reads `allowed_regexp` in `multi` mode. CORS was already scoped. Since the CSRF increment the
+   CLI's generated `.env` sets both variables from the configured domain, so a new install is scoped by
+   default.
 2. `SameSite=Lax` is documented as the active CSRF control, with its two residual gaps stated (§15.4).
 3. Registration is queued as its own increment with explicit prerequisites (§15.6).
 
 ### 15.6 The smallest safe change, for the follow-up increment
 
-Not applied. Recorded so the follow-up starts from an analysed position.
+**IMPLEMENTED.** `app.py` registers the middleware between `configure_cors(app)` and
+`register_ee_middlewares(app)`, alongside a `warn_if_origins_unscoped()` startup guard. The prerequisites
+below were re-checked against the code first; items 2 and 5 were wrong as written — see §15.3 and the
+2026-08-26 entries in `docs/PROGRESS.md`. Item 5's real breaking callers were the auth proxy (login and
+refresh), the logout DELETE, 19 payment server actions, and signup — not `app/api/billing/*` or
+`app/api/loops/*`, which issue no non-GET to the API.
+
+Original analysis, retained:
 
 ```python
 # apps/api/app.py — after configure_cors(app), before register_ee_middlewares(app)

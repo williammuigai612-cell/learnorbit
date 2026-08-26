@@ -22,6 +22,14 @@ export function generateEnvFile(config: SetupConfig): string {
     ? '.localhost'
     : `.${topDomain}`
 
+  // Origin allowlist for the API's CSRF middleware (and CORS in multi-tenancy).
+  // The shipped config.yaml default is a catch-all that matches ANY origin, so a
+  // generated deployment that set neither of these got CSRF protection that
+  // accepts every cross-site origin — protection in name only. Scope it to the
+  // domain the operator configured; no domain is invented here.
+  const escapedDomain = config.domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const allowedRegexp = `^https?://(?:[a-z0-9-]+\\.)*${escapedDomain}(:\\d+)?$`
+
   const nextAuthSecret = generateSecret()
   const jwtSecret = generateSecret()
   const collabInternalKey = generateSecret()
@@ -36,6 +44,8 @@ export function generateEnvFile(config: SetupConfig): string {
     '',
     `LEARNHOUSE_DOMAIN=${domainWithPort}`,
     `HTTP_PORT=${config.httpPort}`,
+    `LEARNHOUSE_ALLOWED_ORIGINS=${baseUrl}`,
+    `LEARNHOUSE_ALLOWED_REGEXP=${allowedRegexp}`,
     '',
     '# =============================================================================',
     '# Frontend Environment Variables (NEXT_PUBLIC_*)',

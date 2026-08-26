@@ -4,6 +4,8 @@
 // The generic payment config and offer services live in payments.ts / offers.ts.
 import { getAPIUrl } from '@services/config/config';
 import { RequestBodyWithAuthHeader, errorHandling, secureFetch } from '@services/utils/ts/requests';
+// Server actions carry no browser Origin; the API's CSRF middleware needs one.
+import { withServerOrigin } from '@services/config/serverOrigin';
 
 /**
  * Generate a Stripe Connect OAuth link for the given org.
@@ -16,7 +18,7 @@ export async function getStripeOnboardingLink(
 ) {
   const result = await secureFetch(
     `${getAPIUrl()}payments/${encodeURIComponent(String(orgId))}/stripe/connect/link?redirect_uri=${encodeURIComponent(redirect_uri)}`,
-    RequestBodyWithAuthHeader('POST', null, null, access_token)
+    withServerOrigin(RequestBodyWithAuthHeader('POST', null, null, access_token))
   );
   const res = await errorHandling(result);
   return res;
@@ -50,7 +52,7 @@ export async function getStripeExpressOnboardingLink(
 ) {
   const result = await secureFetch(
     `${getAPIUrl()}payments/${encodeURIComponent(String(orgId))}/stripe/express/connect/link?redirect_uri=${encodeURIComponent(redirect_uri)}`,
-    RequestBodyWithAuthHeader('POST', null, null, access_token)
+    withServerOrigin(RequestBodyWithAuthHeader('POST', null, null, access_token))
   );
   const res = await errorHandling(result);
   return res;
@@ -66,7 +68,7 @@ export async function refreshStripeExpressOnboardingLink(
 ) {
   const result = await secureFetch(
     `${getAPIUrl()}payments/${encodeURIComponent(String(orgId))}/stripe/express/connect/refresh?redirect_uri=${encodeURIComponent(redirect_uri)}`,
-    RequestBodyWithAuthHeader('POST', null, null, access_token)
+    withServerOrigin(RequestBodyWithAuthHeader('POST', null, null, access_token))
   );
   const res = await errorHandling(result);
   return res;

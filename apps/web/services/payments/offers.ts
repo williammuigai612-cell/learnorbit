@@ -1,6 +1,8 @@
 'use server';
 import { getAPIUrl } from '@services/config/config';
 import { RequestBodyWithAuthHeader, getResponseMetadata, secureFetch } from '@services/utils/ts/requests';
+// Server actions carry no browser Origin; the API's CSRF middleware needs one.
+import { withServerOrigin } from '@services/config/serverOrigin';
 
 export async function getOffers(orgId: number, access_token: string) {
   const result = await secureFetch(
@@ -13,7 +15,7 @@ export async function getOffers(orgId: number, access_token: string) {
 export async function createOffer(orgId: number, data: any, access_token: string) {
   const result = await secureFetch(
     `${getAPIUrl()}payments/${encodeURIComponent(String(orgId))}/offers`,
-    RequestBodyWithAuthHeader('POST', data, null, access_token)
+    withServerOrigin(RequestBodyWithAuthHeader('POST', data, null, access_token))
   );
   return getResponseMetadata(result);
 }
@@ -21,7 +23,7 @@ export async function createOffer(orgId: number, data: any, access_token: string
 export async function updateOffer(orgId: number, offerId: string, data: any, access_token: string) {
   const result = await secureFetch(
     `${getAPIUrl()}payments/${encodeURIComponent(String(orgId))}/offers/${encodeURIComponent(offerId)}`,
-    RequestBodyWithAuthHeader('PUT', data, null, access_token)
+    withServerOrigin(RequestBodyWithAuthHeader('PUT', data, null, access_token))
   );
   return getResponseMetadata(result);
 }
@@ -29,7 +31,7 @@ export async function updateOffer(orgId: number, offerId: string, data: any, acc
 export async function archiveOffer(orgId: number, offerId: string, access_token: string) {
   const result = await secureFetch(
     `${getAPIUrl()}payments/${encodeURIComponent(String(orgId))}/offers/${encodeURIComponent(offerId)}`,
-    RequestBodyWithAuthHeader('DELETE', null, null, access_token)
+    withServerOrigin(RequestBodyWithAuthHeader('DELETE', null, null, access_token))
   );
   return getResponseMetadata(result);
 }
@@ -76,7 +78,7 @@ export async function getOfferCheckoutSession(
 ) {
   const result = await secureFetch(
     `${getAPIUrl()}payments/${encodeURIComponent(String(orgId))}/offers/${encodeURIComponent(offerUuid)}/checkout?redirect_uri=${encodeURIComponent(redirect_uri)}`,
-    RequestBodyWithAuthHeader('POST', null, null, access_token)
+    withServerOrigin(RequestBodyWithAuthHeader('POST', null, null, access_token))
   );
   return getResponseMetadata(result);
 }
@@ -84,7 +86,7 @@ export async function getOfferCheckoutSession(
 export async function getBillingPortalSession(orgId: number, return_url: string, access_token: string) {
   const result = await secureFetch(
     `${getAPIUrl()}payments/${encodeURIComponent(String(orgId))}/billing/portal?return_url=${encodeURIComponent(return_url)}`,
-    RequestBodyWithAuthHeader('POST', null, null, access_token)
+    withServerOrigin(RequestBodyWithAuthHeader('POST', null, null, access_token))
   );
   return getResponseMetadata(result);
 }

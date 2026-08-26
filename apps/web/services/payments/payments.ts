@@ -3,6 +3,8 @@
 // Provider-specific connection logic lives in services/payments/providers/<provider>.ts
 import { getAPIUrl } from '@services/config/config';
 import { RequestBodyWithAuthHeader, errorHandling, secureFetch } from '@services/utils/ts/requests';
+// Server actions carry no browser Origin; the API's CSRF middleware needs one.
+import { withServerOrigin } from '@services/config/serverOrigin';
 
 export async function getPaymentConfigs(orgId: number, access_token: string) {
   const result = await secureFetch(
@@ -21,7 +23,7 @@ export async function initializePaymentConfig(
 ) {
   const result = await secureFetch(
     `${getAPIUrl()}payments/${encodeURIComponent(String(orgId))}/config?provider=${encodeURIComponent(provider)}`,
-    RequestBodyWithAuthHeader('POST', data, null, access_token)
+    withServerOrigin(RequestBodyWithAuthHeader('POST', data, null, access_token))
   );
   const res = await errorHandling(result);
   return res;
@@ -30,7 +32,7 @@ export async function initializePaymentConfig(
 export async function deletePaymentConfig(orgId: number, id: string, access_token: string) {
   const result = await secureFetch(
     `${getAPIUrl()}payments/${encodeURIComponent(String(orgId))}/config?id=${encodeURIComponent(id)}`,
-    RequestBodyWithAuthHeader('DELETE', null, null, access_token)
+    withServerOrigin(RequestBodyWithAuthHeader('DELETE', null, null, access_token))
   );
   const res = await errorHandling(result);
   return res;

@@ -328,6 +328,74 @@ describe('config-store', () => {
 // is provided, it must land in both places verbatim; the template must
 // never emit "=undefined".
 
+// ─── generateEnvFile — CSRF origin allowlist ────────────────
+//
+// The API's shipped allowed_regexp is a catch-all that matches ANY origin, so a
+// generated deployment that set neither of these ran the CSRF middleware against
+// an allowlist that accepts every cross-site origin — protection in name only.
+// The generated .env must scope it to the operator's own configured domain.
+
+describe('generateEnvFile — CSRF origin allowlist', () => {
+  const originsOf = (env: string) =>
+    Object.fromEntries(
+      env.split('\n')
+        .filter((l) => l.startsWith('LEARNHOUSE_ALLOWED_'))
+        .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]),
+    )
+
+  it('emits both origin allowlist variables', () => {
+    const vars = originsOf(generateEnvFile(baseConfig))
+    expect(Object.keys(vars).sort()).toEqual([
+      'LEARNHOUSE_ALLOWED_ORIGINS',
+      'LEARNHOUSE_ALLOWED_REGEXP',
+    ])
+  })
+
+  it('scopes the regexp to the configured domain, anchored', () => {
+    const { LEARNHOUSE_ALLOWED_REGEXP: re } = originsOf(
+      generateEnvFile({ ...baseConfig, domain: 'learn.example.com', httpPort: 443, useHttps: true }),
+    )
+    expect(re.startsWith('^')).toBe(true)
+    expect(re.endsWith('$')).toBe(true)
+    const compiled = new RegExp(re)
+    expect(compiled.test('https://learn.example.com')).toBe(true)
+    expect(compiled.test('https://sub.learn.example.com')).toBe(true)
+    expect(compiled.test('https://learn.example.com:8443')).toBe(true)
+    // The whole point: an attacker's origin must not match.
+    expect(compiled.test('https://evil.test')).toBe(false)
+    expect(compiled.test('https://learn.example.com.evil.test')).toBe(false)
+  })
+
+  it('is not the catch-all the API ships as its default', () => {
+    const { LEARNHOUSE_ALLOWED_REGEXP: re } = originsOf(generateEnvFile(baseConfig))
+    // config.yaml's default fullmatches any well-formed origin; the canary the
+    // API's own scoped-regexp check uses must NOT match.
+    expect(new RegExp(re).test('https://not-an-allowed-origin-canary.invalid')).toBe(false)
+  })
+
+  it('escapes dots so a lookalike domain cannot match', () => {
+    const { LEARNHOUSE_ALLOWED_REGEXP: re } = originsOf(
+      generateEnvFile({ ...baseConfig, domain: 'learn.example.com' }),
+    )
+    expect(new RegExp(re).test('https://learnXexample.com')).toBe(false)
+  })
+
+  it('sets the exact origin allowlist to the deployment base URL', () => {
+    const { LEARNHOUSE_ALLOWED_ORIGINS: origins } = originsOf(
+      generateEnvFile({ ...baseConfig, domain: 'learn.example.com', httpPort: 443, useHttps: true }),
+    )
+    expect(origins).toBe('https://learn.example.com')
+  })
+
+  it('keeps localhost installs working', () => {
+    const { LEARNHOUSE_ALLOWED_REGEXP: re, LEARNHOUSE_ALLOWED_ORIGINS: origins } = originsOf(
+      generateEnvFile({ ...baseConfig, domain: 'localhost', httpPort: 3000 }),
+    )
+    expect(new RegExp(re).test('http://localhost:3000')).toBe(true)
+    expect(origins).toBe('http://localhost:3000')
+  })
+})
+
 describe('generateEnvFile — dbPassword handling', () => {
   it('writes dbPassword into both connection string and POSTGRES_PASSWORD', () => {
     const env = generateEnvFile({ ...baseConfig, dbPassword: 'Sup3rS3cret-Abc_123' })

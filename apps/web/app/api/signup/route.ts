@@ -126,9 +126,17 @@ export async function POST(request: NextRequest) {
 
   let backendRes: Response
   try {
+    // Relay the browser's origin context: this POST is built server-side, so
+    // nothing sets Origin for it and the API's CSRF middleware would refuse it.
+    // The caller's own value is forwarded rather than a synthesised one.
+    const originContext: Record<string, string> = {}
+    for (const name of ['origin', 'referer']) {
+      const value = request.headers.get(name)
+      if (value) originContext[name] = value
+    }
     backendRes = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...originContext },
       body: JSON.stringify(backendBody),
       signal: AbortSignal.timeout(8000),
     })
