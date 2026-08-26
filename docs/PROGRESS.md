@@ -5587,3 +5587,90 @@ repository**, on any branch.
 - **Next**: decide the Codecov token question (add the secret, or stop failing CI on upload error), since
   it currently masks the pass/fail signal of every API Tests run. Then wire the single-head check into
   `release.yaml`.
+
+## CI — Alembic single-head gate on `release.yaml` (2026-08-26)
+
+The previous entry's **Next** item. `api-tests.yaml` gated pushes and PRs, but a release still shipped
+without checking the migration graph: a branched graph could reach GHCR and only fail later, when a
+deployment ran `alembic upgrade head`. This closes that gap with the same gate, on the release path.
+
+### CI
+
+- **`.github/workflows/release.yaml`** — new **`migrations`** job, placed first in `jobs:`, and
+  `needs: migrations` added to **`build`**. The job graph is now
+  `migrations → build → release → notify`.
+
+  It is a **separate gating job, not steps inside `build`**. `build` is a two-runner matrix
+  (`linux/amd64` + `linux/arm64`) whose first meaningful action already pushes to the registry
+  (`push-by-digest=true`), so inlining would have run the gate twice — including a Python/uv install on
+  the arm64 runner — and placed it alongside the very publish it is meant to precede. As a `needs:`
+  dependency it runs once and blocks **both** matrix legs before any GHCR login or push happens.
+
+- **The gate step is byte-identical to the one proven in `api-tests.yaml`** (run `32980506419`) — same
+  `run` block, same `working-directory: apps/api`, same count-based semantics: no revision id is
+  hardcoded, and `grep -c` stays guarded with `|| true` so a zero-head graph reports its own error rather
+  than tripping the runner's `bash -e`. It was copied, not re-derived.
+
+- Setup steps around it are new only because `release.yaml` had no Python job: checkout, `setup-python@v7`
+  (3.14), `setup-uv@v9.0.0` cached on `apps/api/uv.lock`, `uv sync` — the same versions `api-tests.yaml`
+  uses. **`ffmpeg` is deliberately omitted**: its comment there scopes it to the video transcode tests,
+  and `alembic heads` reads the revision files only. The job carries `permissions: contents: read` so the
+  gate does not inherit the workflow-level `packages: write`.
+
+- **Triggers, image naming, GHCR configuration and versioning are untouched.** `on:` remains
+  `push.tags: ['lo-[0-9]*']` only; `push-by-digest=true`, the absent `:latest`, and
+  `IMAGE_NAME: ${{ github.repository }}` are all unchanged — asserted, not assumed (below).
+
+### Files
+
+- **Changed:** `.github/workflows/release.yaml` (+46 lines, 0 deletions — two hunks: the new job and the
+  one `needs:` line), `docs/PROGRESS.md` (this entry)
+- **No migration, application source, test, `api-tests.yaml`, Codecov, Docker, release-script, tag or
+  deployment file was touched.**
+
+### Verification — local/static only
+
+- **YAML parses** (`yaml.safe_load`) → valid.
+- **Job graph asserted programmatically**: `migrations` exists and has no `needs` (runs first);
+  `build.needs == migrations`; `release.needs == build`; `notify.needs == release`.
+- **Gate equivalence asserted**: the `run` block parsed out of `release.yaml` compares **equal** to the
+  one parsed out of `api-tests.yaml` — string comparison, not inspection. `working-directory` matches.
+- **Gate placement asserted**: the `migrations` job contains no docker, login, build or push step.
+- **Publish surface asserted unchanged**: `push-by-digest=true` present, no `:latest` in the tag
+  generator, `IMAGE_NAME` still derived from `github.repository`.
+- **Gate logic exercised** with the workflow's exact snippet:
+
+  | Input | Result |
+  |---|---|
+  | Real `uv run alembic heads` in `apps/api` | `b7e4f1a92c83 (head)` → **exit 0** |
+  | Synthetic two heads | exit 1, `found 2` |
+  | Synthetic zero heads | exit 1, `found 0` |
+  | Synthetic `<rev> (mybranch) (head)` | exit 0 |
+
+  The real run reproduces run `32980506419`'s output exactly, with no database available.
+- **`git diff --check`** → exit 0.
+- `actionlint` is not installed in this environment and **was not installed**; validation is
+  `yaml.safe_load` plus the structural assertions above.
+
+### Limitations
+
+- **Not observed running on GitHub Actions — real-runner verification remains pending.** `release.yaml`
+  fires **only** on `push: tags: 'lo-[0-9]*'`; it has no `workflow_dispatch`, and adding one would change
+  a release trigger. The only way to execute it is to create a real `lo-X.Y.Z` tag, which would build and
+  publish a production image — not a legitimate way to test a gate. First live proof therefore comes with
+  the next genuine release tag. The untested surface is the surrounding setup steps, not the gate logic,
+  which has already passed on a runner in `api-tests.yaml`.
+- **Nothing was tagged, built, published or deployed**, and no image reached GHCR during this increment.
+- **The Codecov token question is still open and still separate**: `CODECOV_TOKEN` does not exist in this
+  fork and `fail_ci_if_error: true` makes every API Tests run report failure over a passing gate and a
+  passing suite. Pre-existing, untouched here, and unrelated to `release.yaml`, which has no Codecov step.
+- The gate validates the migration graph of the tagged commit's tree. It does **not** run the API test
+  suite on release; a release still ships without executing tests.
+
+### Git
+
+No commit, no push, no tag. Working tree carries `.github/workflows/release.yaml` and `docs/PROGRESS.md`
+only.
+
+- **Next**: commit this increment. Then decide the Codecov token question, which still masks the pass/fail
+  signal of every API Tests run.

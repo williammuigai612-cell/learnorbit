@@ -32,9 +32,55 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # A release ships a migration graph as well as an image. `alembic upgrade
+  # head` fails on a branched graph, so a split has to stop the release before
+  # anything is pushed, not after a deployment tries to upgrade. Same gate
+  # api-tests.yaml runs on pushes and PRs; `build` needs it, so no image is
+  # built or pushed until it passes. No database required: `alembic heads`
+  # reads the revision files only.
+  migrations:
+    name: Check migration graph
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: latest
+          enable-cache: true
+          cache-dependency-glob: "apps/api/uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+        working-directory: apps/api
+
+      - name: Check for a single Alembic head
+        # Two heads mean two branches of the migration graph each claim to be
+        # the latest, and `alembic upgrade head` fails on deploy. Catch the
+        # split here. Which revision is on top doesn't matter — the count does.
+        run: |
+          heads=$(uv run alembic heads)
+          echo "Alembic heads:"
+          echo "$heads"
+          count=$(printf '%s\n' "$heads" | grep -c '(head)' || true)
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected exactly 1 Alembic head, found $count. Merge the migration branches back into a single head."
+            exit 1
+          fi
+        working-directory: apps/api
+
   build:
     name: Build (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
+    needs: migrations
     strategy:
       fail-fast: false
       matrix:
