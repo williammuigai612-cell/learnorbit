@@ -78,6 +78,7 @@ import { deploymentsCommand } from '../src/commands/deployments.js'
 import { backupCommand } from '../src/commands/backup.js'
 import { restoreCommand } from '../src/commands/restore.js'
 import { updateCommand } from '../src/commands/update.js'
+import { APP_IMAGE_VERSION } from '../src/constants.js'
 import { doctorCommand } from '../src/commands/doctor.js'
 import { promptAdmin } from '../src/prompts/admin.js'
 import { promptOrganization } from '../src/prompts/organization.js'
@@ -1958,7 +1959,8 @@ describe('setup / update in-process', () => {
     vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new ProcessExit(code ?? 0)
     }) as never)
-    // resolveAppImage hits GitHub/GHCR — force the offline fallback to :latest.
+    // resolveAppImage makes no network call any more; the mock stays as a
+    // sentinel — an accidental fetch on the setup path would reject loudly.
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
     healthMock.waitForHealth.mockResolvedValue(true)
     healthMock.waitForOrgSeed.mockResolvedValue(true)
@@ -2602,9 +2604,11 @@ describe('setup / update in-process', () => {
     // avoids alembic. waitForHealth is stubbed. The flow should complete.
     await expect(updateCommand({ backup: false, migrate: false })).resolves.toBeUndefined()
 
-    // The compose tag was rewritten to :latest (offline fallback).
-    expect(fs.readFileSync(path.join(dir, 'docker-compose.yml'), 'utf-8'))
-      .toContain('ghcr.io/williammuigai612-cell/learnorbit:latest')
+    // No --to: the tag moves to the version this CLI pins. `:latest` is never
+    // published for this repository, so it can no longer be the default.
+    const yml = fs.readFileSync(path.join(dir, 'docker-compose.yml'), 'utf-8')
+    expect(yml).toContain(`ghcr.io/williammuigai612-cell/learnorbit:${APP_IMAGE_VERSION}`)
+    expect(yml).not.toContain('learnorbit:latest')
   })
 
   it('setup --ci EE with external DB and Cloudflare DNS generates config', async () => {

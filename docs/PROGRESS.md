@@ -4944,3 +4944,94 @@ No commit, no push, no tag. Nothing published.
 - **Next**: unchanged — commit the deployment/image milestone and push `learnorbit-v1`, with the queued
   **CSRF middleware registration** increment (`docs/DEPLOYMENT_PLAN.md` §15.6) as the next code increment.
   Do not begin either automatically.
+
+---
+
+## Deployment — deterministic LearnOrbit image resolution (2026-08-26)
+
+The two blockers the read-only release preflight found, either of which would have left a published
+`lo-1.0.0` unreachable from the CLI: `resolveAppImage()` still asked
+`api.github.com/repos/learnhouse/learnhouse/releases` which version a LearnOrbit deployment should run,
+and every default path fell back to `…/learnorbit:latest` — a tag `release.yaml` deliberately never
+publishes.
+
+### The version this pins, and why
+
+`APP_IMAGE_VERSION = '1.0.0'` (`apps/cli/src/constants.ts`) is the **application image** release line,
+deliberately neither of the two version numbers already in the repo:
+
+| Version | What it is | Release line |
+|---|---|---|
+| `1.5.1` — `apps/cli/package.json`, `VERSION` | this CLI's npm version | inherited `cli-*` tags |
+| `1.3.4` — `apps/web`, `apps/collab`, `apps/api` | inherited upstream application version | inherited `[0-9]*` tags |
+| **`1.0.0`** — `APP_IMAGE_VERSION` | **the image LearnOrbit publishes** | **`lo-[0-9]*` tags** |
+
+Not ambiguous and not invented here: §12.4 of `docs/DEPLOYMENT_PLAN.md` already records the decision —
+release tags are `lo-X.Y.Z` starting at `lo-1.0.0`, image tags are plain semver, `:latest` is never
+published. `release.yaml` derives the image tag from the git tag alone and reads no version file, so
+nothing in the repo can supply this number; it has to be stated once, and this is where.
+
+### Completed
+
+- **No upstream release discovery on any production path.** `resolveAppImage()` is now a pure mapping —
+  `dev` → `DEV_IMAGE`, `stable` → `APP_IMAGE` — with no `fetch` at all. The GitHub releases request, the
+  GHCR token request and the manifest probe are gone; `isLatest` is kept in the returned shape (callers
+  destructure it) but can no longer be true.
+- **No production path produces `learnorbit:latest`.** `APP_IMAGE` is now
+  `…/learnorbit:${APP_IMAGE_VERSION}`; `setup --image <this repo>` with no tag pins that version instead
+  of `:latest`; `update` with no `--to` targets it on both the default and the deployment-pinned path.
+- **Third-party registries are untouched.** `--image ghcr.io/acme/fork` with no tag still falls back to
+  `:latest` and still warns — only this project's own repository is known not to publish one.
+- **The pre-flight pull safety fix is intact.** `--to`, `--migrate`/`--no-migrate`, `--no-backup`, digest
+  refusal, the repository-mismatch fail-closed guard, and "a failed pull leaves docker-compose.yml
+  unchanged" are all unchanged and still covered.
+- `checkForUpdates()` is untouched: it checks the npm registry for this CLI's own package, which is not
+  image resolution.
+
+### Files
+
+`apps/cli/src/constants.ts` (`APP_IMAGE_VERSION`, `APP_IMAGE` derived from it),
+`apps/cli/src/services/version-check.ts` (`resolveAppImage` offline; upstream lookup deleted),
+`apps/cli/src/commands/setup.ts` (`resolveDeploymentImage` fallback tag),
+`apps/cli/src/commands/update.ts` (custom-path fallback tag; no-`--to` target),
+`apps/cli/tests/unit.test.ts`, `apps/cli/tests/setup-ci-port.test.ts`,
+`apps/cli/tests/commands.test.ts`, `apps/cli/tests/update-migration.test.ts`,
+`docs/DEPLOYMENT_PLAN.md` §12.4, `docs/PROGRESS.md`.
+
+### Verification
+
+- `apps/cli` normal suite (`tsup` build + the 15 files `bun run test` runs): **675/675 passing**, 15
+  files (672 before, +3 net new).
+- **RED proven before implementing**: the new expectations failed 7/7 against the old resolution —
+  `resolveAppImage('stable')` returned `…:latest`, `setup --image <repo>` wrote `…:latest`, and `update`
+  with no `--to` wrote `…:latest`.
+- New/updated tests prove: no `learnhouse/learnhouse` request (and in fact no `fetch`) on either channel;
+  the stable channel resolves to a concrete `X.Y.Z`; no channel and no default path yields `:latest`;
+  `--image` on a third-party repository still defaults to `:latest`; the compose template pins a version.
+- `apps/cli/tests/integration.test.ts` **not modified** — Section 2 still pins
+  `ghcr.io/learnhouse/app:1.0.1` upgrading to `1.3.4`, deliberately exercising upstream compatibility.
+- `git diff --check` exit 0.
+
+### Limitations
+
+- **The tag must now be published.** With `APP_IMAGE_VERSION = 1.0.0`, a fresh `setup` writes
+  `…/learnorbit:1.0.0`; until `lo-1.0.0` is pushed and `release.yaml` publishes that image, the pull
+  fails. This change makes the release meaningful — it does not perform it. Nothing was tagged,
+  published or deployed.
+- **Live integration suite deliberately not run.** Its Section 1 failure on CI was
+  `…/learnorbit:latest` not existing; pinning `:1.0.0`, which is also unpublished, cannot make it pass,
+  so running it would only reproduce the same registry `denied`. It becomes meaningful after the first
+  image is published.
+- `tsc --noEmit` in `apps/cli` remains pre-existing noise in this environment (`@types/node`
+  unresolved — TS2591 is 900 of 1028 diagnostics, spread across untouched files). No new diagnostic
+  appears in the changed regions. It is not a configured gate (§11.2).
+- `checkForUpdates()` and `apps/cli/package.json` still carry upstream's npm package name
+  (`learnhouse`). Out of scope here — `cli-publish.yaml` is `workflow_dispatch`-only, so nothing can
+  publish to it — but it is the remaining upstream coordinate in the CLI.
+
+### Git
+
+No commit, no push, no tag. Nothing published or deployed.
+
+- **Next**: create and push the `lo-1.0.0` release tag (a user action — commands are in the preflight
+  report), then the queued **CSRF middleware registration** increment (`docs/DEPLOYMENT_PLAN.md` §15.6).

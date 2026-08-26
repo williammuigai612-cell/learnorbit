@@ -22,7 +22,8 @@ import { waitForHealth, waitForOrgSeed } from '../services/health.js'
 import { checkPort, findAvailablePort } from '../utils/network.js'
 import { resolveAppImage } from '../services/version-check.js'
 import { validateEmail, validatePassword, validatePort, validateDomain, validateImageReference } from '../utils/validators.js'
-import { splitImageReference } from '../services/compose-utils.js'
+import { splitImageReference, DEFAULT_APP_IMAGE_REPOSITORY } from '../services/compose-utils.js'
+import { APP_IMAGE_VERSION } from '../constants.js'
 import { setupEnterprise, type EeSetupOptions } from './setup-ee.js'
 
 const STEP_NAMES = [
@@ -150,22 +151,28 @@ function wantsEnterprise(edition?: string): boolean {
 /**
  * The image this deployment will run.
  *
- * A configured `appImage` wins outright and skips the upstream lookup
- * entirely, so an installation pinned to its own registry can never be handed
- * the official LearnHouse image. Without one, `resolveAppImage()` runs exactly
- * as before.
+ * A configured `appImage` wins outright, so an installation pinned to its own
+ * registry can never be handed a different one. Without one,
+ * `resolveAppImage()` returns the version this CLI ships.
  *
  * `requestedTag` comes from the `--image ref[:tag]` the operator typed; only
  * the repository half is persisted, because the tag is what `update` changes.
+ * With no tag, the fallback depends on the registry: this project publishes
+ * only immutable version tags and no `:latest` (docs/DEPLOYMENT_PLAN.md
+ * §12.4), so its own repository pins the shipped version; anyone else's keeps
+ * the historical `:latest`.
  */
 async function resolveDeploymentImage(
   config: SetupConfig,
   requestedTag?: string,
 ): Promise<{ image: string; isLatest: boolean }> {
   if (config.appImage) {
+    const fallbackTag =
+      config.appImage === DEFAULT_APP_IMAGE_REPOSITORY ? APP_IMAGE_VERSION : 'latest'
+    const tag = requestedTag || fallbackTag
     return {
-      image: `${config.appImage}:${requestedTag || 'latest'}`,
-      isLatest: !requestedTag,
+      image: `${config.appImage}:${tag}`,
+      isLatest: tag === 'latest',
     }
   }
   return resolveAppImage(config.channel)

@@ -1,5 +1,17 @@
 export const VERSION = '1.5.1'
-export const APP_IMAGE = 'ghcr.io/williammuigai612-cell/learnorbit:latest'
+
+// The LearnOrbit application image release line. `release.yaml` publishes one
+// immutable tag per `lo-X.Y.Z` git tag — `lo-1.0.0` → `:1.0.0` — and
+// deliberately never `:latest` (docs/DEPLOYMENT_PLAN.md §12.4), so a default
+// install has to name a concrete version. This is that version; bump it when a
+// new `lo-` tag is published.
+//
+// It is deliberately its own number. VERSION above is this CLI's npm version
+// (upstream's `cli-*` release line), and apps/web|collab|api carry the
+// inherited upstream application version — neither describes what LearnOrbit
+// publishes to ghcr.io/williammuigai612-cell/learnorbit.
+export const APP_IMAGE_VERSION = '1.0.0'
+export const APP_IMAGE = `ghcr.io/williammuigai612-cell/learnorbit:${APP_IMAGE_VERSION}`
 export const DEV_IMAGE = 'ghcr.io/williammuigai612-cell/learnorbit:dev'
 export const NGINX_IMAGE = 'nginx:alpine'
 export const POSTGRES_IMAGE = 'pgvector/pgvector:pg16'

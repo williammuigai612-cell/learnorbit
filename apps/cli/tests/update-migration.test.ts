@@ -34,6 +34,7 @@ vi.mock('../src/services/health.js', () => ({
 }))
 
 import { updateCommand } from '../src/commands/update.js'
+import { APP_IMAGE_VERSION } from '../src/constants.js'
 
 describe('update — content-migration status arms', () => {
   let home: string
@@ -163,6 +164,19 @@ describe('update — appImage (deployment-pinned image)', () => {
     await updateCommand({ backup: false, migrate: false })
     expect(compose()).toContain('image: ghcr.io/learnhouse/app:')
     expect(compose()).not.toContain(LO)
+  })
+
+  it('targets the pinned version when no --to is given', async () => {
+    write({ appImage: LO }, `${LO}:0.9.0`)
+    await updateCommand({ backup: false, migrate: false })
+    expect(compose()).toContain(`image: ${LO}:${APP_IMAGE_VERSION}`)
+    expect(compose()).not.toContain(`${LO}:latest`)
+  })
+
+  it('still defaults a third-party repository to :latest', async () => {
+    write({ appImage: 'ghcr.io/acme/fork' }, 'ghcr.io/acme/fork:1.0.0')
+    await updateCommand({ backup: false, migrate: false })
+    expect(compose()).toContain('image: ghcr.io/acme/fork:latest')
   })
 })
 

@@ -28,6 +28,7 @@ vi.mock('../src/services/health.js', () => ({
 }))
 
 import { setupCommand } from '../src/commands/setup.js'
+import { APP_IMAGE_VERSION } from '../src/constants.js'
 
 describe('setup --ci automatic port fallback', () => {
   let home: string
@@ -104,11 +105,13 @@ describe('setup --ci --image', () => {
     vi.restoreAllMocks()
   })
 
-  it('without --image, keeps the default LearnOrbit image and writes no appImage', async () => {
+  it('without --image, pins the default LearnOrbit version and writes no appImage', async () => {
     await setupCommand({ ...base, name: 'plain' })
     const cfg = JSON.parse(read('plain', 'learnhouse.config.json'))
     expect('appImage' in cfg).toBe(false)
-    expect(read('plain', 'docker-compose.yml')).toContain('ghcr.io/williammuigai612-cell/learnorbit')
+    const compose = read('plain', 'docker-compose.yml')
+    expect(compose).toContain(`image: ${LO}:${APP_IMAGE_VERSION}`)
+    expect(compose).not.toContain(`${LO}:latest`)
   })
 
   it('persists the repository half of --image as appImage', async () => {
@@ -124,10 +127,20 @@ describe('setup --ci --image', () => {
     expect(compose).not.toContain('ghcr.io/learnhouse/app')
   })
 
-  it('falls back to :latest when --image carries no tag', async () => {
+  it('pins the current version when --image names this repository with no tag', async () => {
     await setupCommand({ ...base, name: 'lo3', image: LO })
-    expect(read('lo3', 'docker-compose.yml')).toContain(`image: ${LO}:latest`)
+    const compose = read('lo3', 'docker-compose.yml')
+    expect(compose).toContain(`image: ${LO}:${APP_IMAGE_VERSION}`)
+    expect(compose).not.toContain(`${LO}:latest`)
     expect(JSON.parse(read('lo3', 'learnhouse.config.json')).appImage).toBe(LO)
+  })
+
+  it('still falls back to :latest for a third-party repository', async () => {
+    // Only this project's own repository is known not to publish `:latest`.
+    // Someone else's registry keeps the historical default.
+    await setupCommand({ ...base, name: 'lo4', image: 'ghcr.io/acme/fork' })
+    expect(read('lo4', 'docker-compose.yml')).toContain('image: ghcr.io/acme/fork:latest')
+    expect(JSON.parse(read('lo4', 'learnhouse.config.json')).appImage).toBe('ghcr.io/acme/fork')
   })
 
   it('rejects a malformed --image before writing anything', async () => {

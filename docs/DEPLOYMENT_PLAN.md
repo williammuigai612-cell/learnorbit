@@ -709,8 +709,9 @@ optional `appImage` field holding the image *repository* (no tag):
 
 * **Set it at install time** with `npx learnhouse setup --image ghcr.io/williammuigai612-cell/learnorbit:1.0.0`.
   The repository half is persisted as `appImage`; the tag half pins the generated `docker-compose.yml`.
-  Omitting the tag falls back to `:latest`, which this project does not publish — so **always pass a
-  version**.
+  Omitting the tag pins the version this CLI ships (`APP_IMAGE_VERSION` in
+  `apps/cli/src/constants.ts`), because this project publishes no `:latest`; a third-party repository
+  still falls back to `:latest`. Passing the version explicitly stays the clearest option.
 * **`update` reads it back.** With `appImage` set, `npx learnhouse update --to 1.0.1` retags *that*
   repository and never queries or substitutes `ghcr.io/learnhouse/app`. Backup, Alembic baseline,
   migrations, the health gate and rollback semantics are unchanged.
@@ -719,6 +720,15 @@ optional `appImage` field holding the image *repository* (no tag):
   the error names both values. Previously this case silently changed nothing and still reported success.
 * **`appImage` is not a secret** — it is a public image path and belongs in version control alongside the
   rest of the deployment config.
+
+**3. Default image resolution is pinned, not discovered.** `resolveAppImage()` used to read
+`api.github.com/repos/learnhouse/learnhouse/releases` — upstream's numbering decided what a LearnOrbit
+install ran — and fell back to `:latest` on any failure. It now returns `APP_IMAGE`
+(`…/learnorbit:${APP_IMAGE_VERSION}`) with no network call at all: since exactly one immutable tag is
+published per `lo-X.Y.Z` and no floating tag exists, the version the CLI ships with *is* the answer, and
+a lookup could only ever return a tag that was never published. **`APP_IMAGE_VERSION` must be bumped
+when a new `lo-` tag is released**, and the tag it names must exist in GHCR before that CLI version is
+used to install.
 
 **Backward compatibility:** a config without `appImage` behaves exactly as before — `ghcr.io/learnhouse/app`,
 resolved through the release channel. Existing LearnHouse installations are unaffected.

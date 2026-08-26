@@ -1,8 +1,7 @@
 import pc from 'picocolors'
-import { VERSION, DEV_IMAGE } from '../constants.js'
+import { VERSION, APP_IMAGE, DEV_IMAGE } from '../constants.js'
 
 const NPM_REGISTRY_URL = 'https://registry.npmjs.org/learnhouse'
-const GHCR_BASE = 'ghcr.io/williammuigai612-cell/learnorbit'
 
 function compareVersions(a: string, b: string): number {
   const pa = a.split('.').map(Number)
@@ -41,62 +40,25 @@ export async function checkForUpdates(): Promise<void> {
 }
 
 /**
- * Resolve the Docker image tag for the LearnHouse app.
+ * Resolve the Docker image this installation should run.
  *
- * - channel 'dev'    → always returns ghcr.io/williammuigai612-cell/learnorbit:dev
- * - channel 'stable' → fetches the latest app release tag from GitHub, falls back to :latest
+ * - channel 'dev'    → the dev image
+ * - channel 'stable' → the pinned LearnOrbit release (`APP_IMAGE`)
+ *
+ * Deliberately offline and deterministic. `release.yaml` publishes exactly one
+ * immutable tag per `lo-X.Y.Z` git tag and no `:latest`
+ * (docs/DEPLOYMENT_PLAN.md §12.4), so there is nothing to discover: the version
+ * this CLI ships with *is* the answer. The lookup this replaces read
+ * upstream's release feed (`learnhouse/learnhouse`), which let upstream's
+ * numbering decide what a LearnOrbit deployment ran, and fell back to
+ * `:latest` — a tag this project never publishes, so the fallback could only
+ * ever pin an image that cannot be pulled.
+ *
+ * `isLatest` is kept in the shape callers destructure; it can no longer be
+ * true on either channel.
  */
 export async function resolveAppImage(
   channel: 'stable' | 'dev' = 'stable',
 ): Promise<{ image: string; isLatest: boolean }> {
-  if (channel === 'dev') {
-    return { image: DEV_IMAGE, isLatest: false }
-  }
-
-  try {
-    // Get the latest app release tag from GitHub (excludes cli-* tags)
-    const releasesResp = await fetch(
-      'https://api.github.com/repos/learnhouse/learnhouse/releases',
-      {
-        signal: AbortSignal.timeout(5000),
-        headers: { Accept: 'application/vnd.github+json' },
-      },
-    )
-    if (!releasesResp.ok) throw new Error('GitHub API failed')
-
-    const releases = await releasesResp.json() as { tag_name: string; draft: boolean; prerelease: boolean }[]
-    const appRelease = releases.find(
-      (r) => !r.draft && !r.prerelease && !r.tag_name.startsWith('cli-'),
-    )
-    if (!appRelease) throw new Error('No app release found')
-
-    const appVersion = appRelease.tag_name
-
-    // Verify the Docker image exists for this version
-    const tokenResp = await fetch(
-      'https://ghcr.io/token?scope=repository:williammuigai612-cell/learnorbit:pull',
-      { signal: AbortSignal.timeout(5000) },
-    )
-    if (!tokenResp.ok) throw new Error('GHCR token failed')
-    const { token } = await tokenResp.json() as { token: string }
-
-    const manifestResp = await fetch(
-      `https://ghcr.io/v2/williammuigai612-cell/learnorbit/manifests/${appVersion}`,
-      {
-        signal: AbortSignal.timeout(5000),
-        headers: {
-          Accept: 'application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json',
-          Authorization: `Bearer ${token}`,
-        },
-      },
-    )
-
-    if (manifestResp.ok) {
-      return { image: `${GHCR_BASE}:${appVersion}`, isLatest: false }
-    }
-  } catch {
-    // Network error — fall through to latest
-  }
-
-  return { image: `${GHCR_BASE}:latest`, isLatest: true }
+  return { image: channel === 'dev' ? DEV_IMAGE : APP_IMAGE, isLatest: false }
 }

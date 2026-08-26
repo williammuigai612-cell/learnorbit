@@ -7,6 +7,7 @@ import { dockerComposeDown, dockerComposeUp, dockerComposePull, dockerPullImage 
 import { migrateContentVolume } from '../services/content-volume-migration.js'
 import { waitForHealth } from '../services/health.js'
 import { validateImageReference, validateImageTag } from '../utils/validators.js'
+import { APP_IMAGE, APP_IMAGE_VERSION } from '../constants.js'
 import {
   ComposeImageMismatchError,
   DEFAULT_APP_IMAGE_REPOSITORY,
@@ -160,8 +161,14 @@ export async function updateCommand(options: { version?: string; migrate?: boole
   // `docker compose pull` performs later, just done while it is still undoable.
   let customTargetImage: string | undefined
   if (hasCustomImage) {
-    customTargetImage = `${imageRepository}:${targetVersion || 'latest'}`
-    if (!targetVersion) {
+    // With no --to, fall back to a tag that exists. This project publishes
+    // only immutable version tags (docs/DEPLOYMENT_PLAN.md §12.4), so its own
+    // repository defaults to the version this CLI ships; any other registry
+    // keeps the historical `:latest`.
+    const fallbackTag =
+      imageRepository === DEFAULT_APP_IMAGE_REPOSITORY ? APP_IMAGE_VERSION : 'latest'
+    customTargetImage = `${imageRepository}:${targetVersion || fallbackTag}`
+    if (!targetVersion && fallbackTag === 'latest') {
       p.log.warn(
         `No --to version given, so this targets ${imageRepository}:latest. ` +
           'Deployments that publish only immutable version tags should pass --to <version>.',
@@ -242,7 +249,11 @@ export async function updateCommand(options: { version?: string; migrate?: boole
       }
       s.stop(`Found v${targetVersion}`)
     } else {
-      targetImage = `${GHCR_BASE}:latest`
+      // No --to on an install tracking the LearnOrbit image: move to the
+      // version this CLI ships. `:latest` is never published for this
+      // repository, so the old default could only ever pin an image that
+      // cannot be pulled.
+      targetImage = APP_IMAGE
     }
 
     // Update the image in docker-compose.yml

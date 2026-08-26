@@ -17,7 +17,7 @@ import { resolveAppImage } from '../src/services/version-check.js'
 import { formatBytes } from '../src/commands/update.js'
 import { waitForHealth, waitForOrgSeed, waitForEeReady } from '../src/services/health.js'
 import { checkForUpdates } from '../src/services/version-check.js'
-import { VERSION } from '../src/constants.js'
+import { VERSION, APP_IMAGE, APP_IMAGE_VERSION } from '../src/constants.js'
 import { autoDetectDeploymentId, listDeploymentContainers, getContainerRestartCount, isDockerInstalled, isDockerRunning, dockerComposeWorks, dockerComposePs, dockerExecToFile, dockerExecFromFile, dockerStats, dockerStatsForContainers, dockerExec, getContainerLogs, getDockerDiskUsage, isTcpPortListening, dockerComposeUpRetry, waitForAptLock, installDockerLinux } from '../src/services/docker.js'
 import { readEnvVar, setEnvVar, isExternalDbInstall, ensureAlembicBaseline, runAlembicUpgrade } from '../src/commands/update-ee.js'
 import {
@@ -108,7 +108,10 @@ describe('generateDockerCompose', () => {
 
   it('uses default APP_IMAGE when no image provided', () => {
     const yml = generateDockerCompose(baseConfig)
-    expect(yml).toContain('ghcr.io/williammuigai612-cell/learnorbit:')
+    expect(yml).toContain(`ghcr.io/williammuigai612-cell/learnorbit:${APP_IMAGE_VERSION}`)
+    // `:latest` is never published for this repository — a compose that asked
+    // for it would generate an install nothing can pull.
+    expect(yml).not.toContain('learnorbit:latest')
   })
 
   it('mounts a content volume on filesystem delivery', () => {
@@ -1849,8 +1852,11 @@ describe('validateRequired', () => {
 
 // ─── resolveAppImage — channel / version resolution ─────────
 //
-// `dev` is a pure mapping; `stable` queries GitHub + GHCR and must fall
-// back to :latest on any network failure (never throw, never block setup).
+// The production image is a LearnOrbit release: `release.yaml` publishes one
+// immutable `:X.Y.Z` tag per `lo-X.Y.Z` git tag and deliberately no `:latest`
+// (docs/DEPLOYMENT_PLAN.md §12.4). Resolution is therefore a pinned constant
+// rather than a lookup — no upstream release feed decides what a LearnOrbit
+// install runs, and no fallback can hand it a tag that was never published.
 
 describe('resolveAppImage', () => {
   afterEach(() => { vi.restoreAllMocks() })
@@ -1862,39 +1868,31 @@ describe('resolveAppImage', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('falls back to :latest when the network fails', async () => {
+  it('resolves the stable channel to the pinned LearnOrbit version, offline', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const res = await resolveAppImage('stable')
+    expect(res).toEqual({ image: APP_IMAGE, isLatest: false })
+    expect(res.image).toBe(`ghcr.io/williammuigai612-cell/learnorbit:${APP_IMAGE_VERSION}`)
+    expect(APP_IMAGE_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('never queries the upstream learnhouse release feed', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    await resolveAppImage('stable')
+    await resolveAppImage('dev')
+    const urls = fetchSpy.mock.calls.map((c) => String(c[0]))
+    expect(urls.filter((u) => u.includes('learnhouse/learnhouse'))).toEqual([])
+    expect(urls).toEqual([])
+  })
+
+  it('never resolves to :latest, on any channel, even offline', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
-    const res = await resolveAppImage('stable')
-    expect(res).toEqual({ image: 'ghcr.io/williammuigai612-cell/learnorbit:latest', isLatest: true })
-  })
-
-  it('pins the newest non-draft release when its image manifest exists', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
-      const url = String(input)
-      if (url.includes('api.github.com')) {
-        return new Response(JSON.stringify([
-          { tag_name: 'cli-9.9.9', draft: false, prerelease: false },
-          { tag_name: '1.4.2', draft: false, prerelease: false },
-        ]), { status: 200 })
-      }
-      if (url.includes('ghcr.io/token')) return new Response(JSON.stringify({ token: 't' }), { status: 200 })
-      return new Response('', { status: 200 }) // manifest exists
-    })
-    const res = await resolveAppImage('stable')
-    expect(res).toEqual({ image: 'ghcr.io/williammuigai612-cell/learnorbit:1.4.2', isLatest: false })
-  })
-
-  it('falls back to :latest when the release exists but its image manifest is missing', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
-      const url = String(input)
-      if (url.includes('api.github.com')) {
-        return new Response(JSON.stringify([{ tag_name: '1.4.2', draft: false, prerelease: false }]), { status: 200 })
-      }
-      if (url.includes('ghcr.io/token')) return new Response(JSON.stringify({ token: 't' }), { status: 200 })
-      return new Response('', { status: 404 }) // manifest missing
-    })
-    const res = await resolveAppImage('stable')
-    expect(res).toEqual({ image: 'ghcr.io/williammuigai612-cell/learnorbit:latest', isLatest: true })
+    for (const channel of ['stable', 'dev'] as const) {
+      const res = await resolveAppImage(channel)
+      expect(res.image).not.toContain(':latest')
+      expect(res.isLatest).toBe(false)
+    }
   })
 })
 
