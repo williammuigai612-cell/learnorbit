@@ -101,10 +101,20 @@
       disarmed, and the CLI treats the application image as a per-deployment `appImage` setting rather than
       a hardcoded upstream path. The content-volume backup gap remains **open**. See docs/PROGRESS.md
       Phase 9F and the three Deployment entries that follow it)
-- [ ] First GHCR publish and production deployment (still outstanding: `learnorbit-v1` has not been pushed —
-      `origin` is an empty repository — so no workflow has run, no image exists, and the GHCR package
-      visibility has not been set. The publishing pipeline is verified by inspection and tests only, never
-      end-to-end)
+- [x] First GHCR publish (`learnorbit-v1` is pushed; release tags `lo-1.0.0` (its build failed and
+      published nothing), `lo-1.0.1` and `lo-1.0.2` exist. Run `32959234326` published
+      `ghcr.io/williammuigai612-cell/learnorbit:1.0.2` as an OCI multi-arch manifest list — linux/amd64 +
+      linux/arm64, digest `sha256:ea2200f4…`. Verified independently of the workflow: an anonymous pull
+      token resolves the manifest, so package visibility is public, while `:latest` and `:1.0.0` correctly
+      404. A live smoke test booted a throwaway stack from the published digest — all containers healthy in
+      26s, legitimate origins reaching the application, cross-origin and origin-less mutations refused
+      403, and the Next.js auth-proxy origin forwarding working end to end. The pipeline is no longer
+      verified by inspection alone. See docs/PROGRESS.md, the Deployment entries)
+- [ ] Production deployment (still outstanding: **nothing has been deployed anywhere**. It needs a host,
+      DNS, TLS and a production environment — in particular `LEARNHOUSE_ALLOWED_REGEXP` /
+      `LEARNHOUSE_ALLOWED_ORIGINS` scoped to the real domain, which the CLI now generates from the
+      configured domain at install time rather than leaving on the shipped catch-all. The content-volume
+      backup gap (`docs/DEPLOYMENT_PLAN.md` §9.2) and the deployment decisions recorded there remain open)
 
 ## Rule
 Complete and test one meaningful feature before moving to the next.
