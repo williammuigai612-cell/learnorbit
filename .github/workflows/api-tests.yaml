@@ -2,6 +2,7 @@ name: API Tests
 permissions:
   contents: read
 on:
+  workflow_dispatch:
   push:
     branches:
       - dev
