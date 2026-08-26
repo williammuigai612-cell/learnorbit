@@ -5153,3 +5153,110 @@ Committed and pushed on `learnorbit-v1`. No tag created, moved or deleted. Nothi
 deployed.
 
 - **Next**: create and push `lo-1.0.1` from this commit, then watch the release workflow.
+
+---
+
+## Deployment — `lo-1.0.1` published and verified end to end (2026-08-26)
+
+The first LearnOrbit production image is live. `ghcr.io/williammuigai612-cell/learnorbit:1.0.1` exists,
+is publicly pullable, and a real CLI install runs on it.
+
+### The release
+
+- **Tag `lo-1.0.1`** (annotated, object `515ca0f5dab517cc066ddac4afd4ed3297590abf`) → commit
+  `6cb08b116cbcb8f579901e1aa602a18ff89a0b1a` *fix(cli): target LearnOrbit image 1.0.1*. Pushed as a
+  single ref; `git push --tags` was never used.
+- **Release workflow run `32944722191`: success** in ~8 minutes — `Build (linux/amd64)` ✅,
+  `Build (linux/arm64)` ✅, `Create release and push manifest` ✅, `Announce release` ✅. The
+  `frontend-deps` stage that killed `lo-1.0.0` at 25 seconds passed cleanly, confirming the Bun base-image
+  pin in `63053bd4`.
+- **Published image** — one immutable tag, exactly as §12.4 specifies:
+
+  | | |
+  |---|---|
+  | Coordinate | `ghcr.io/williammuigai612-cell/learnorbit:1.0.1` |
+  | Media type | `application/vnd.oci.image.index.v1+json` (manifest list) |
+  | `linux/amd64` | `sha256:1e0cbcd9d1514212f1737360c81547ef9718df75803665d4efa4871614da7f68` |
+  | `linux/arm64` | `sha256:0022557db106397c37fccf2232c3f2ded7623b89d97833b6c011ecebbb5ab0a3` |
+  | List digest | `sha256:7e565b078bc1c12989658bf1a6e675d69411fed4f62b062d96d04773c558732e` |
+
+- **Verified independently of the workflow**, by anonymous registry probe (no credentials): `:1.0.1` →
+  **HTTP 200**; `:latest` → **404** (deliberately never published); `:1.0.0` → **404** (the failed release
+  published nothing, confirmed).
+- **`lo-1.0.0` was left exactly as it was** — same tag object, same target `da277266`, still unpublished.
+  Not deleted, moved, force-updated or recreated.
+
+### Verification — live integration suite
+
+Three runs, all on `6cb08b11` with nothing modified:
+
+| Run | Result |
+|---|---|
+| Full suite, first attempt | ❌ 8 passed / 54 skipped, 944 s |
+| **Section 1 only** (`-t "live install"`), image cached | ✅ **39 passed / 0 failed**, 157 s |
+| **Section 2 only** (`-t "upgrade \(old"`), images cached | ✅ **15 passed / 0 failed**, 428 s |
+
+**Section 1 — LearnOrbit 1.0.1 install.** All five containers healthy **36 s** after start (db+redis at
+21 s), `acme` org seeded, and `docker-compose.yml` pinned `ghcr.io/williammuigai612-cell/learnorbit:` as
+asserted at `integration.test.ts:97`. Covered: `setup --ci` file generation, all six input-validation
+error paths, `status`, `health`, `doctor`, `logs`, `env`, two `backup` archives with real `pg_dump`,
+four `restore` cases (including corrupt-archive safety), two `stop`/`start` cycles, and admin
+authentication against the `acme` org.
+
+**Section 2 — upstream compatibility, untouched coordinates.** `ghcr.io/learnhouse/app:1.0.1` healthy in
+**44 s**; `update --migrate` exits 0; the compose no longer pins the old image and **the running
+container actually moved to 1.3.4** (the LEA-47 surface — retag without pull — still holds); **alembic at
+head** after the full migration delta, data intact; `--no-migrate` skips alembic and prints instructions;
+`--version` stays swallowed by the global flag; a plain `update` writes a pre-upgrade backup; `doctor`
+all green; `stop`/`start` keeps the new image.
+
+### The first-run failure — diagnosed, no code change warranted
+
+The full-suite attempt failed in both live sections, and neither failure reproduced in isolation:
+
+- **Section 1** — `beforeAll` hit its 600 s budget while pulling the 1.89 GB image for the first time.
+  With the image cached the same phase takes 36 s.
+- **Section 2** — the app was marked `unhealthy` and `docker compose up -d --wait` (`helpers.ts:75`) tore
+  the stack down. Run alone, the same image is healthy in 44 s; booted standalone outside vitest, in 25 s.
+
+The healthcheck is **not in either image** (`Config.Healthcheck: null` on both) — it comes from the CLI's
+compose template (`src/templates/docker-compose.ts:164`): `curl -f http://localhost/api/v1/health`,
+`interval 30s`, `retries 3`, `start_period 60s`. `curl` is present in the old image. A standalone boot
+shows four probes returning `502` while nginx is up before uvicorn, then `exit=0` at +25 s — ordinary
+warm-up. Under the contention of a concurrent multi-GB pull the API simply did not answer inside
+`start_period`.
+
+**Classification: environment/timing in the combined run — not the upstream image, not a LearnOrbit
+regression, and not a defect in the test.** Loosening a production healthcheck to suit a loaded CI box
+would be the wrong trade, so nothing was changed.
+
+### Verification commands
+
+```
+node_modules/.bin/vitest run tests/integration.test.ts -t "live install"
+node_modules/.bin/vitest run tests/integration.test.ts -t "upgrade \(old"
+```
+
+`-t` is a **regex**: an unescaped `-t "upgrade (old"` fails instantly with
+`Invalid regular expression: Unterminated group` before Docker is touched.
+
+### Limitations
+
+- A full `test:integration` on a slow or loaded machine can still exceed `start_period: 60s`. Pre-pull the
+  images or run the sections separately; CI budgets 45 minutes for the job.
+- `--to with a nonexistent version fails clearly without touching the install` **passes locally** but
+  failed in CI run `32895836468` on the `toContain('not found')` assertion at `integration.test.ts:603`.
+  The exit-code half passed there and the CLI printed the correct refusal, so this looks like a
+  difference in docker's error text between environments — open, unexamined, and deliberately untouched.
+- `cli-tests.yaml` has a `paths:` filter but no ref filter, so pushing a `lo-` tag also starts a CLI Tests
+  run. It publishes nothing.
+- Section 3 was not re-run after the full-suite attempt, where it passed 8/8.
+
+### Git
+
+Committed on `learnorbit-v1` as *docs: record lo-1.0.1 release verification*. Tags `lo-1.0.0` and
+`lo-1.0.1` are unchanged locally and on origin; nothing was published manually.
+
+- **Next**: `APP_IMAGE_VERSION` and the published image now agree at 1.0.1, so the deployment path is
+  usable end to end. The queued code increment is **CSRF middleware registration**
+  (`docs/DEPLOYMENT_PLAN.md` §15.6).
