@@ -707,7 +707,7 @@ optional `appImage` field holding the image *repository* (no tag):
 }
 ```
 
-* **Set it at install time** with `npx learnhouse setup --image ghcr.io/williammuigai612-cell/learnorbit:1.0.0`.
+* **Set it at install time** with `npx learnhouse setup --image ghcr.io/williammuigai612-cell/learnorbit:1.0.1`.
   The repository half is persisted as `appImage`; the tag half pins the generated `docker-compose.yml`.
   Omitting the tag pins the version this CLI ships (`APP_IMAGE_VERSION` in
   `apps/cli/src/constants.ts`), because this project publishes no `:latest`; a third-party repository

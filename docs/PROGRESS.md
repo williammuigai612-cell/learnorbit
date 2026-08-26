@@ -5105,3 +5105,51 @@ Committed on `learnorbit-v1`. No tag created, moved or deleted. Nothing publishe
 
 - **Next**: decide how to re-release — either move/replace `lo-1.0.0` (it is unpublished, so nothing
   downstream depends on it) or cut the next `lo-` tag from the fixed commit.
+
+---
+
+## Deployment — LearnOrbit image target moved to 1.0.1 (2026-08-26)
+
+`lo-1.0.0` exists remotely but points at `da277266`, whose tree cannot build (the Bun base image drift
+fixed in `63053bd4`). That tag is not being deleted, moved or recreated, and `:1.0.0` was never
+published — so the next publishable image is `…/learnorbit:1.0.1`, and the CLI has to target it before
+`lo-1.0.1` is cut.
+
+### Completed
+
+- `APP_IMAGE_VERSION` `1.0.0` → **`1.0.1`** in `apps/cli/src/constants.ts`. `APP_IMAGE` derives from it,
+  so `setup` (default and `--image <this repo>` with no tag) and `update` (no `--to`, both the default
+  and deployment-pinned paths) now resolve `ghcr.io/williammuigai612-cell/learnorbit:1.0.1`.
+- **No test changes were needed.** Every assertion on the default version interpolates
+  `APP_IMAGE_VERSION` rather than hardcoding it (`unit.test.ts` 111/1875, `commands.test.ts` 2610,
+  `setup-ci-port.test.ts` 113/133, `update-migration.test.ts` 172), so they followed the bump on their
+  own. The remaining literal `1.0.0` strings in the suite are fixture tags — custom `--image` pins,
+  compose fixtures, validator inputs — and are deliberately unchanged.
+- `docs/DEPLOYMENT_PLAN.md` §12.4: the concrete `setup --image …:1.0.0` example now reads `:1.0.1`. The
+  `lo-X.Y.Z` → `:X.Y.Z` scheme illustrations elsewhere are generic and untouched.
+
+### Files
+
+`apps/cli/src/constants.ts`, `docs/DEPLOYMENT_PLAN.md`, `docs/PROGRESS.md`.
+
+### Verification
+
+- `apps/cli` normal suite (`tsup` build + the 15 files `bun run test` runs): **675/675 passing**, 15
+  files.
+- `git diff --check` exit 0; `git diff --summary` empty (no mode changes).
+- Unchanged, as required: CLI `VERSION` 1.5.1, web/collab/api 1.3.4, `.bun-version`, `packageManager`
+  fields, every `bun.lock`, `release.yaml`, and `integration.test.ts`'s upstream coordinates
+  (`ghcr.io/learnhouse/app:1.0.1` → `1.3.4`).
+
+### Limitations
+
+- `:1.0.1` does not exist yet — the tag `lo-1.0.1` has **not** been created. Until it is pushed and
+  `release.yaml` publishes the image, a fresh `setup` writes a compose that cannot be pulled.
+- `lo-1.0.0` remains exactly as it was: same tag object, same target commit, still unpublished.
+
+### Git
+
+Committed and pushed on `learnorbit-v1`. No tag created, moved or deleted. Nothing published or
+deployed.
+
+- **Next**: create and push `lo-1.0.1` from this commit, then watch the release workflow.
