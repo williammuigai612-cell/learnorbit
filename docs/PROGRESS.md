@@ -5035,3 +5035,73 @@ No commit, no push, no tag. Nothing published or deployed.
 
 - **Next**: create and push the `lo-1.0.0` release tag (a user action — commands are in the preflight
   report), then the queued **CSRF middleware registration** increment (`docs/DEPLOYMENT_PLAN.md` §15.6).
+
+---
+
+## Deployment — `lo-1.0.0` release build failure: Bun base image pinned (2026-08-26)
+
+The first release tag `lo-1.0.0` (→ `da277266`) triggered `release.yaml`; both build jobs failed at
+"Build and push by digest" and the manifest/announce jobs were skipped, so **no image was published**.
+
+### Cause
+
+`Dockerfile` used the floating `oven/bun:1-alpine`, which now resolves to Bun **1.4.0**, while the
+repository pins Bun **1.3.14** (`.bun-version`, `apps/web` and `apps/collab` `packageManager`) and
+`apps/web/bun.lock` was written by 1.3.14. Bun 1.4.0 rejected it:
+
+```
+error: lockfile had changes, but lockfile is frozen
+note: overrides in package.json changed since bun.lock was saved
+```
+
+Nothing in the repository was actually out of sync — `apps/web/package.json` and `apps/web/bun.lock`
+carry the same 15 `overrides` entries with the same values, differing only in key order. 1.4.0 simply
+wants the lockfile rewritten in its own format. `collab-builder` passed the same step because
+`apps/collab/package.json` declares no `overrides` at all. The trigger was time (the upstream image
+moving), not a repository change: the failing stages copy `apps/web`, `apps/collab` and `apps/api`, none
+of which `da277266` touched.
+
+### Completed
+
+- Pinned all three Bun base images in the root `Dockerfile` to `oven/bun:1.3.14-alpine`
+  (`frontend-deps`, `frontend-builder`, `collab-builder`) — the toolchain version the lockfiles were
+  written for. The lockfiles were **not** regenerated and Bun was **not** upgraded.
+
+### Files
+
+`Dockerfile` (3 `FROM` lines), `docs/PROGRESS.md`.
+
+### Verification
+
+- `oven/bun:1.3.14-alpine` exists on Docker Hub for **both** `linux/amd64` and `linux/arm64`, which the
+  multi-arch release requires.
+- `docker run --rm oven/bun:1.3.14-alpine bun --version` → `1.3.14`.
+- `docker build --target frontend-deps .` — the stage that failed in CI — now gets **past** the frozen
+  lockfile check (`bun install v1.3.14`, no "lockfile is frozen" error).
+- `docker build --target collab-builder .` → **succeeds** end to end.
+- `git diff --check` exit 0.
+
+### Limitations
+
+- **The `frontend-deps` stage was not built to completion locally.** Both attempts cleared the frozen
+  lockfile check and then failed while unpacking a dependency — `Fail extracting tarball for
+  "pdfjs-dist"` on the first run, `"next"` on the second, each after ~280s, with 941 GB free. A
+  different package each time points at this WSL Docker environment (extraction/network), not at the
+  repository; the defect this change fixes is the lockfile rejection, which no longer occurs. Full
+  confirmation comes from CI on the next release build.
+- The same floating `oven/bun:1-alpine` remains in `apps/collab/Dockerfile`, `apps/web/Dockerfile` and
+  the generated `apps/web/.next/standalone/Dockerfile`. None is built by `release.yaml`; left untouched
+  as out of scope, but they carry the identical drift.
+- The runtime stage still installs Bun via `curl https://bun.sh/install` (unpinned, so 1.4.0) for the
+  collab `bun install --production`. That call does not use `--frozen-lockfile` and `apps/collab` has no
+  `overrides`, so it is not affected by this failure mode — but it is unpinned.
+- `lo-1.0.0` was **not** deleted, moved or force-updated, and no replacement tag was created. The tag
+  still points at `da277266`, whose tree cannot build; publishing `:1.0.0` will need a decision about
+  that tag.
+
+### Git
+
+Committed on `learnorbit-v1`. No tag created, moved or deleted. Nothing published or deployed.
+
+- **Next**: decide how to re-release — either move/replace `lo-1.0.0` (it is unpublished, so nothing
+  downstream depends on it) or cut the next `lo-` tag from the fixed commit.
