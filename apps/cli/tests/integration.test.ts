@@ -598,9 +598,32 @@ describe('CLI integration — upgrade (old → new image)', () => {
 
   describe('update flag edge cases', () => {
     it('--to with a nonexistent version fails clearly without touching the install', () => {
+      const composePath = path.join(installDir, 'docker-compose.yml')
+      const composeBefore = fs.readFileSync(composePath, 'utf-8')
+      const imageBefore = getContainerImage(appContainer())
+
       const r = cli('update --to 0.0.0-nonexistent --no-backup --no-migrate', 60_000)
+
       expect(r.exitCode).not.toBe(0)
-      expect(r.stdout + r.stderr).toContain('not found')
+      // Assert the CLI's OWN refusal, not the registry's wording. Docker's
+      // message for an absent tag differs by daemon/registry version — locally
+      // `manifest tagged "..." not found`, in Actions `manifest unknown` — so
+      // matching 'not found' passed on a laptop and failed in CI while the CLI
+      // behaved identically in both. Only text this project controls is stable
+      // enough to assert on.
+      expect(r.stdout + r.stderr).toMatch(/refusing to update/i)
+
+      // The half the name promises, and the actual regression surface: a tag
+      // that cannot be pulled must leave the deployment exactly as it was. The
+      // original bug rewrote the compose tag BEFORE anything checked the tag
+      // could be pulled, so the command exited 1 having pinned the install to
+      // an image that does not exist — and the next `up` had nothing to start.
+      const composeAfter = fs.readFileSync(composePath, 'utf-8')
+      expect(composeAfter).toBe(composeBefore)
+      expect(composeAfter).not.toContain('0.0.0-nonexistent')
+      // Compared against what was running a moment ago rather than a pinned
+      // version, so this holds whether or not the upgrade tests ran first.
+      expect(getContainerImage(appContainer())).toBe(imageBefore)
     })
 
     it('--no-migrate re-upgrades but skips alembic, printing instructions', () => {
