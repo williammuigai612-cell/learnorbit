@@ -5669,11 +5669,12 @@ deployment ran `alembic upgrade head`. This closes that gap with the same gate, 
 
 ### Git
 
-No commit, no push, no tag. Working tree carries `.github/workflows/release.yaml` and `docs/PROGRESS.md`
-only.
+Written before the commit. The increment shipped as `6238721a` — `ci(release): gate releases on a single
+Alembic head` (`.github/workflows/release.yaml`, `docs/PROGRESS.md`) — pushed to `origin/learnorbit-v1`.
+No tag was created; nothing was built, published or deployed.
 
-- **Next**: commit this increment. Then decide the Codecov token question, which still masks the pass/fail
-  signal of every API Tests run.
+- **Next**: decide the Codecov token question, which still masks the pass/fail signal of every API Tests
+  run. *Resolved 2026-08-27 — see the next entry.*
 
 ## CI — Codecov upload made non-blocking on `api-tests.yaml` (2026-08-27)
 
