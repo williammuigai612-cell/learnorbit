@@ -5674,3 +5674,72 @@ only.
 
 - **Next**: commit this increment. Then decide the Codecov token question, which still masks the pass/fail
   signal of every API Tests run.
+
+## CI — Codecov upload made non-blocking on `api-tests.yaml` (2026-08-27)
+
+The **Next** item carried by the previous two entries, and the last CI cleanup before production
+deployment. Since run `32980506419`, API Tests reported red on a fully passing job: the gate passed, the
+suite passed, coverage passed, and then the Codecov upload failed closed and took the workflow down with
+it. The pass/fail signal of every run was masked by a step that reports nothing about the code.
+
+### CI
+
+- **`.github/workflows/api-tests.yaml`** — `Upload API coverage to Codecov`: `fail_ci_if_error: true` →
+  **`false`**. One line. `codecov/codecov-action@v7` and every other input (`files`, `flags`, `name`) are
+  unchanged.
+- **Decision: no `CODECOV_TOKEN` secret.** For LearnOrbit V1, coverage reporting to a third party is
+  informational; the enforced coverage signal is `--cov-fail-under=25` inside `Run tests with coverage`,
+  which runs on the runner and still fails the job on its own. Adding a token would introduce an external
+  service dependency and a secret to rotate in exchange for a dashboard nobody gates on. The upload is
+  left in place, still attempted, and now simply warns when it cannot authenticate — so it starts working
+  the day a token is added, with no workflow change.
+- The `htmlcov/` artifact upload (`if: always()`) is untouched and remains the way to read coverage detail
+  off a run.
+
+### Files
+
+- **Changed:** `.github/workflows/api-tests.yaml` (one line), `docs/PROGRESS.md` (this entry)
+- No application source, test, coverage threshold, Alembic gate, migration, `release.yaml`, release script
+  or Docker file was touched. Nothing was tagged, published or deployed.
+
+### Verification — run 33099952171 (`workflow_dispatch`, head `9d8fbd7e`)
+
+- **Overall conclusion: success.** Job `test` green in 9m37s; every step reports
+  `outcome=success;conclusion=success`.
+- **`Check for a single Alembic head` → success**: `Alembic heads:` / `b7e4f1a92c83 (head)` — exactly one.
+- **`Run tests with coverage` → success**: `5798 passed, 23 skipped, 201 warnings in 521.61s`;
+  `TOTAL 29273 837 97%`; `Required test coverage of 25% reached. Total coverage: 97.14%`;
+  `Coverage XML written to file coverage.xml`.
+- **`Upload API coverage to Codecov` → the upload still fails, the step does not.** Log still shows
+  `Token length: 0` and `Upload queued for processing failed: {"message":"Token required - not valid
+  tokenless upload"}`, and the step now ends `outcome=success;conclusion=success`. This is exactly the
+  intended behaviour: the failure is visible in the log, and it no longer decides the workflow.
+- `api-coverage-report` artifact uploaded as before.
+- Local: `git diff --stat` = 1 file, 1 insertion, 1 deletion; `git diff --check` and
+  `git diff --cached --check` clean; workflow re-parsed with the WSL Python `yaml` module (already
+  installed, nothing added) and the step resolves to
+  `{files: apps/api/coverage.xml, flags: api, name: api-coverage, fail_ci_if_error: False}`.
+
+### Limitations
+
+- **The push that made this change could not trigger the workflow it changes.** `api-tests.yaml` still
+  filters `push`/`pull_request` on `paths: apps/api/**`, and this commit touches only the workflow file,
+  so the run above was raised by `workflow_dispatch` — the trigger added in `ca82a845` for exactly this
+  reason. Automatic triggers are unchanged.
+- **A first dispatch, `32985141381`, sat `queued` for ~26h without ever being assigned a runner** and
+  expired without producing a job. Other workflows ran normally throughout (E2E executed on 2026-08-27),
+  and the re-dispatch ran immediately, so this reads as transient GitHub-side queueing, not configuration.
+  Worth remembering if a dispatched run appears to hang: cancel and re-dispatch rather than debug.
+- **Coverage is no longer reported to Codecov at all** while no token exists — the upload is attempted and
+  rejected every run. Nothing in CI depends on it, but the Codecov project will show no data.
+- `release.yaml` still has no real-runner proof of its `migrations` job; that limitation from the previous
+  entry stands, and first live proof still comes with the next genuine `lo-X.Y.Z` tag.
+
+### Git
+
+- `9d8fbd7e` — `ci(api): make Codecov upload non-blocking`, pushed; `origin/learnorbit-v1` matches HEAD,
+  working tree clean.
+
+- **Next**: production deployment. CI is now clean end to end — API Tests green on a real runner, the
+  single-head gate proven on `api-tests.yaml` and wired into `release.yaml`. Deployment was explicitly
+  out of scope for this increment and was not started.
