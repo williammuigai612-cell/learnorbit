@@ -5805,7 +5805,7 @@ allowlist. `config.ts`, `server-wrapper.js` and the token-exchange route are not
 
 ### Git
 
-- No commit made. 24 files modified in the working tree on `learnorbit-v1`.
+- Committed in `7a9a5470`.
 
 - **Next**: Terms/Privacy pages for LearnOrbit plus a dedicated legal-URL config, which would restore the
   consent line and the footer links. MFA issuer and email branding remain deferred and were not started.
@@ -5871,8 +5871,7 @@ of them cover MFA or these strings.
 
 ### Git
 
-- No commit made. Working tree on `learnorbit-v1` carries this increment plus the uncommitted legal-footer
-  increment from earlier the same day.
+- Committed in `7a9a5470`.
 
 - **Next**: email branding (sender name `LearnHouse <…>` in `services/email/utils.py:391` and the
   `LearnHouseEmail.tsx` template). Not started.
@@ -5958,8 +5957,7 @@ string, so branding edits cannot affect link building or validation.
 
 ### Git
 
-- No commit made. Working tree on `learnorbit-v1` carries this increment plus the uncommitted legal-footer
-  and MFA increments.
+- Committed in `7a9a5470`.
 
 - **Next**: the 184-string `translations.py` rebrand across 20 languages, and — before production email —
   a LearnOrbit logo asset plus sending-domain configuration (SPF/DKIM/DMARC). Not started.
@@ -6034,8 +6032,7 @@ authentication, and unsubscribe behaviour. No configuration, env var, or DNS cha
 
 ### Git
 
-- No commit made. Working tree on `learnorbit-v1` carries this increment plus the uncommitted legal-footer,
-  MFA and email-increment-1 work.
+- Committed in `7a9a5470`.
 
 - **Next**: the 184-string `translations.py` rebrand. Separately, before production email: a LearnOrbit
   logo asset, a verified sending domain, and SPF/DKIM/DMARC. Not started.
@@ -6109,8 +6106,7 @@ restored and re-verified (184 `LearnOrbit`, 0 `LearnHouse`, 90,103 bytes, diff b
 
 ### Git
 
-- No commit made. Working tree on `learnorbit-v1` carries this increment plus the uncommitted
-  legal-footer, MFA, and email increments 1–2.
+- Committed in `7a9a5470`.
 
 - **Next**: resolve `ACADEMY_URL`, then the non-email UI branding items above. Not started.
 
@@ -6172,8 +6168,7 @@ a verified sending domain, and SPF/DKIM/DMARC.
 
 ### Git
 
-- No commit made. Working tree on `learnorbit-v1` carries this plus the uncommitted legal-footer, MFA and
-  email increments 1-3.
+- Committed in `7a9a5470`.
 
 - **Next**: the non-email UI branding items above. Not started.
 
@@ -6221,8 +6216,7 @@ of the others are affected.
 
 ### Git
 
-- No commit made. Working tree on `learnorbit-v1` carries this plus the uncommitted legal-footer, MFA and
-  email increments.
+- Committed in `7a9a5470`.
 
 - **Next**: per the final audit — page titles, locale UI strings, LearnHouse URLs, and (the long pole,
   worth starting in parallel) a LearnOrbit logo asset set. Not started.
@@ -6278,7 +6272,7 @@ was still wrong.
 
 ### Git
 
-- No commit made.
+- Committed in `7a9a5470`.
 
 - **Next**: unchanged — page titles, locale UI strings, LearnHouse URLs, and a LearnOrbit logo asset set.
 
@@ -6330,7 +6324,7 @@ deliberately left for the comment sweep.
 
 ### Git
 
-- No commit made.
+- Committed in `7a9a5470`.
 
 - **Next**: locale UI strings (`apps/web/locales/*.json`) — the largest remaining branding surface. Then
   LearnHouse URLs and the LearnOrbit logo/favicon asset set.
@@ -6414,7 +6408,7 @@ not this deployment.
 
 ### Git
 
-- No commit made.
+- Committed in `7a9a5470`.
 
 - **Next**: LearnHouse URLs (docs/support links, `learnhouse.io` references), then the LearnOrbit
   logo/favicon asset set. The showcase / "LearnHouse Explore" and import-format strings stay open pending
@@ -6515,7 +6509,7 @@ LearnHouse property or an invented URL. Nothing was repointed; no URL configurat
 
 ### Git
 
-- No commit made.
+- Committed in `7a9a5470`.
 
 - **Next**: the same dead-destination cleanup in the surfaces listed under "Left unchanged" (DashLeftMenu,
   DashMobileMenu, AuthBrandingPanel, pricing CTAs, `OrgEditAPIAccess`, `transactional.ts`), then the
@@ -6595,7 +6589,7 @@ already exists, otherwise the link/action is removed.
 
 ### Git
 
-- No commit made.
+- Committed in `7a9a5470`.
 
 - **Next**: `AuthBrandingPanel.tsx:148` (the last live user-visible LearnHouse URL), then the LearnOrbit
   logo/favicon asset set. Still open from earlier: the OrgSignInMethods label reword (product decision), the
@@ -6633,7 +6627,7 @@ logo/asset work.
 
 ### Git
 
-- No commit made.
+- Committed in `7a9a5470`.
 
 - **Next**: the two brand fallbacks in this file, then the LearnOrbit logo/favicon asset set. Still open: the
   OrgSignInMethods label reword (product decision), the locale showcase / "LearnHouse Explore" strings, and
@@ -6670,7 +6664,7 @@ comments at `:34` / `:144`. These belong to the logo/asset and comment sweeps.
 
 ### Git
 
-- No commit made.
+- Committed in `7a9a5470`.
 
 - **Next**: the LearnOrbit logo/favicon asset set. Still open: the OrgSignInMethods label reword (product
   decision), the locale showcase / "LearnHouse Explore" strings, and the email sender/recipient addresses.
@@ -6811,7 +6805,7 @@ text, not artwork. Flagged for the next text pass.
 
 ### Git
 
-- No commit made.
+- Committed in `7a9a5470`.
 
 - **Next**: the AI sub-brand mark (4 assets, 15 consumers) if the AI feature stays LearnOrbit-branded, or the
   `AuthMobileHeader.tsx:83` text fallback as a one-line cleanup. Still open: the OrgSignInMethods label reword
@@ -6855,7 +6849,7 @@ line 83.
 
 ### Git
 
-- No commit made.
+- Committed in `7a9a5470`.
 
 - **Next**: the AI sub-brand mark (4 assets, 15 consumers) if the AI feature stays LearnOrbit-branded. Still
   open: the OrgSignInMethods label reword (product decision), the locale showcase / "LearnHouse Explore"
@@ -6993,7 +6987,7 @@ So the real job is **3 assets across ~8 sites**, not 4 across 15.
 
 ### Git
 
-- No commit made.
+- Committed in `7a9a5470`.
 
 - **Next**: the AI sub-brand decision (see the measured scope above) — either build a LearnOrbit AI mark from
   the approved LearnOrbit geometry/palette, or retire the sub-brand and point those ~8 sites at the existing
@@ -7099,7 +7093,7 @@ Zero references to any of the three remain anywhere in `apps/`.
 
 ### Git
 
-- No commit made.
+- Committed in `7a9a5470`.
 
 - **Next**: the branding sweep is now complete except **email sender/recipient addresses**, which are blocked
   on DNS/a controlled domain (`RESEND_FROM_EMAIL` still defaults to a `learnhouse.app` sending domain, and
@@ -7203,10 +7197,12 @@ Post-fix rescan for user-visible branding — `alt`/`title`/`aria-label`/`placeh
   their usage rules to `docs/DESIGN_SYSTEM.md`).
 - Both pushed to `origin/learnorbit-v1`; working tree clean, 0 ahead / 0 behind.
 
-**Supersedes the "No commit made." line in every branding entry above** (18 of them, from the legal-footer
-increment on 2026-08-27 through the AI sub-brand on 2026-08-31). They were accurate when written; all of that
-work is in `7a9a5470`. Those lines were left in place rather than rewritten 18 times — this note is the
-authoritative record.
+**The 18 branding entries above** — from the legal-footer increment on 2026-08-27 through the AI sub-brand on
+2026-08-31 — each carried a "No commit made." line that was accurate when written and stale the moment
+`7a9a5470` landed. All 18 have since been **corrected in place** to ``Committed in `7a9a5470`.``, along with
+the trailing "working tree carries this plus the uncommitted …" notes that seven of them added. Same
+correction-in-place convention as `3c2aa76b` ("docs: correct stale git status in the release.yaml gate
+entry") — a progress log that misreports commit state is worse than one that is merely terse.
 
 - **Next**: unchanged — **email sender/recipient addresses** (DNS/controlled domain) is the last branding
   item, and **production deployment** is the last unchecked roadmap box (`docs/ROADMAP.md` Phase 9).
