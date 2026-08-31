@@ -5744,3 +5744,1364 @@ it. The pass/fail signal of every run was masked by a step that reports nothing 
 - **Next**: production deployment. CI is now clean end to end — API Tests green on a real runner, the
   single-head gate proven on `api-tests.yaml` and wired into `release.yaml`. Deployment was explicitly
   out of scope for this increment and was not started.
+
+## Branding — legal footer separated from LearnHouse (2026-08-27)
+
+Increment 1 of the production branding work, scoped from the legal-footer audit. Removes misleading
+LearnHouse operator identity from the pre-auth legal surfaces without creating legal pages. The
+watermark was already disabled separately through the existing org setting and was not touched.
+
+### Files
+
+- `apps/web/locales/*.json` (22) — `common.copyright` `© {{year}} LearnHouse, Inc.` → `© {{year}} LearnOrbit`
+  in all 22. `auth.terms_text` de-branded in the 10 locales that named LearnHouse (`bn en fa hi ja ko nl
+  sk tr zh`), each edited in its own language; the other 12 were already brand-neutral and were left alone.
+  No corporate entity is asserted — LearnOrbit has no registered legal entity.
+- `apps/web/components/Footers/LegalFooters.tsx` — dropped the hardcoded `learnhouse.io/terms` and
+  `/privacy` fallbacks. `getPlatformUrl()` moved out of module scope into `getLegalUrls()`, called per
+  render, because runtime config is not guaranteed populated at import time and link visibility now
+  depends on the resolved value. `AuthFooter` returns `null` when no legal URL resolves (the consent
+  sentence is meaningless without the documents); `CopyrightFooter` keeps the copyright and renders the
+  Terms/Privacy `<nav>` only when both URLs resolve. Styling and structure otherwise unchanged.
+- `apps/web/app/home/home.tsx` — removed the `Powered by LearnHouse` block above the footer, plus the
+  `platformUrl` local and its import symbol that it orphaned (lint would otherwise fail). `CopyrightFooter`
+  `mt-4` → `mt-10` to inherit the removed block's spacing.
+
+`LEARNHOUSE_PLATFORM_URL` / `NEXT_PUBLIC_LEARNHOUSE_PLATFORM_URL` were deliberately NOT repurposed —
+they are load-bearing for auth token-exchange, email link allowlists and the multi-tenancy base-URL
+allowlist. `config.ts`, `server-wrapper.js` and the token-exchange route are not in the diff.
+
+### Verification
+
+- `node node_modules/eslint/bin/eslint.js components/Footers/LegalFooters.tsx app/home/home.tsx` —
+  **exit 0, no findings**.
+- `node node_modules/typescript/bin/tsc --noEmit` (whole web app) — **exit 0, zero diagnostics**.
+- All 22 locale files re-parsed with `JSON.parse` via node — **all valid**.
+- `grep` on the changed surfaces: no `LearnHouse` in any `copyright`/`terms_text` value; no `learnhouse.io`
+  in `LegalFooters.tsx`; no `Powered by LearnHouse` in `home.tsx`.
+- `git diff --check` clean; `git diff --stat` = 24 files, 80 insertions, 78 deletions.
+
+### Limitations
+
+- **Web test suite not run.** `bun` is unavailable in the Windows shell used for this session, and both
+  locale-adjacent suites (`rtl-guard`, `course-structure-translatable-text`) import `bun:test` /
+  `import.meta.dir`, so they cannot run under `node --test`. Neither covers these strings —
+  `apps/web/tests` has zero references to `copyright`, `terms_text`, `terms_of_service` or `LegalFooter`.
+  There is still no test guarding against LearnHouse branding in user-visible output.
+- **No browser verification.** Nothing listening on :3000 or the API port, and the stack needs `bun` plus
+  Postgres/Redis via `npx learnhouse dev`.
+- **Behaviour change:** `PLATFORM_URL` is unset in this deployment, so `getPlatformUrl()` returns `null`
+  and the auth consent line now renders nothing at all on the five `/auth/*` pages, while `/home` shows
+  the copyright with no legal links. Intended — omit rather than bind users to a third party's terms —
+  but it means signup currently presents no terms link. Correct until LearnOrbit legal pages exist.
+- **Residual trap:** if `LEARNHOUSE_PLATFORM_URL` is later set for auth/email reasons, the legal links
+  silently reappear pointing at `{platform}/terms` and `/privacy`, which will 404. A dedicated legal-URL
+  config is the right fix when those pages are written; not added here (new infrastructure, out of scope).
+- **Remaining user-visible LearnHouse branding, deliberately out of scope:** `home.tsx:98`
+  `alt="LearnHouse"` on the `/lrn.svg` brand logo; `common.powered_by` = `"Powered by LearnHouse"`, now
+  orphaned in all 22 locales (home.tsx was its only consumer, left in place to preserve localisation
+  structure); `EmbedActivityClient.tsx:281` `PoweredByBadge` `alt="LearnHouse"`; and the previously
+  catalogued `TOTP_ISSUER`, email sender/template, page titles and auth branding panels.
+
+### Git
+
+- No commit made. 24 files modified in the working tree on `learnorbit-v1`.
+
+- **Next**: Terms/Privacy pages for LearnOrbit plus a dedicated legal-URL config, which would restore the
+  consent line and the footer links. MFA issuer and email branding remain deferred and were not started.
+
+## Branding — MFA issuer and backup codes rebranded to LearnOrbit (2026-08-27)
+
+Increment 2 of the production branding work, scoped from the MFA issuer audit. Makes newly enrolled
+users see LearnOrbit in their authenticator app and in the backup-codes file they save.
+
+### Files
+
+- `apps/api/src/services/auth/mfa.py:45` — `TOTP_ISSUER = "LearnHouse"` → `"LearnOrbit"`. This constant's
+  only consumer is `build_provisioning_uri()` (`mfa.py:108`), whose only caller is the enrollment endpoint
+  `routers/mfa.py:220`. The issuer is display-only metadata in the `otpauth://` URI and is never an input
+  to code derivation or verification, so no cryptography, enrollment or verification behaviour changed.
+- `apps/api/src/tests/security/test_mfa.py:63` — assertion updated to `issuer=LearnOrbit`, kept explicit
+  rather than loosened to a generic issuer check, so the value cannot drift silently.
+- `apps/web/components/Objects/Account/subpages/AccountSecurity.tsx` — backup-codes file header
+  defaultValue (`:229`) rebranded, and the saved filename (`:237`) `learnhouse-backup-codes.txt` →
+  `learnorbit-backup-codes.txt`.
+- `apps/web/locales/en.json:1876`, `ar.json:1441` — `codes_file_header` rebranded in place; the Arabic
+  wording was preserved and only the brand token swapped. These are the only 2 of 22 locales that define
+  this key; the other 20 fall through to the component defaultValue, which is now also LearnOrbit, so no
+  key was added anywhere.
+
+The issuer was deliberately NOT made configurable and NOT sourced from `site_name`: a per-deployment
+issuer drifts between environments, silently re-branding new enrollments while old ones keep the previous
+label, and it would pull a config dependency into a security module with a minimal import surface.
+
+### Existing-user impact
+
+None. The issuer is embedded in the QR at enrollment time; stored secrets are untouched and all existing
+codes keep validating. Already-enrolled users keep seeing "LearnHouse" in their authenticator app until
+they voluntarily re-enroll — cosmetic only, no lockout, no forced migration. This is why the change was
+made before launch: it is free now and permanently half-effective once real users enroll.
+
+### Verification
+
+- `TESTING=true .venv/bin/python -m pytest src/tests/security/test_mfa.py -v --no-cov` (run inside WSL) —
+  **31 passed in 4.03s**, including `TestProvisioningURI::test_contains_issuer_and_account`.
+- `pytest src/tests/routers/test_mfa_router.py -q --no-cov` — **45 passed in 20.46s**.
+- `node node_modules/eslint/bin/eslint.js components/Objects/Account/subpages/AccountSecurity.tsx` —
+  **0 errors**; 2 pre-existing warnings (unused eslint-disable at `:682`, `no-console` at `:1106`) that
+  are unrelated to the edited lines and were left alone.
+- `node node_modules/typescript/bin/tsc --noEmit` (whole web app) — **exit 0, zero diagnostics**.
+- `en.json` and `ar.json` re-parsed with `JSON.parse` — both valid.
+- `git diff` on the five files shows exactly the intended changes, no strays.
+
+Environment note: `apps/api/.venv` is a Linux venv, so the API tests were run through `wsl.exe` rather
+than the Windows shell. `bun` remains unavailable, so the web `.test.mjs` suites still cannot run — none
+of them cover MFA or these strings.
+
+### Limitations
+
+- **Must not be "fixed" later:** `_MFA_KEY_INFO = b"learnhouse-mfa-secret-encryption-v1"` (`mfa.py:58`) is
+  the HKDF `info` parameter for the MFA secret encryption key. Changing that string re-derives the key and
+  makes every enrolled TOTP secret undecryptable — a mass 2FA lockout. It is internal, not user-visible,
+  and must stay exactly as it is during any future rebrand sweep. Likewise the
+  `LEARNHOUSE_MFA_ENCRYPTION_KEY` env var name (`mfa.py:10,14,67,71`).
+- Remaining user-visible LearnHouse branding, still deferred: email sender/template, page titles,
+  `AuthBrandingPanel`, `auth.image_title_login`/`image_title_signup`, `home.tsx:98` `alt="LearnHouse"`,
+  the orphaned `common.powered_by` string, and the embed `PoweredByBadge`.
+
+### Git
+
+- No commit made. Working tree on `learnorbit-v1` carries this increment plus the uncommitted legal-footer
+  increment from earlier the same day.
+
+- **Next**: email branding (sender name `LearnHouse <…>` in `services/email/utils.py:391` and the
+  `LearnHouseEmail.tsx` template). Not started.
+
+## Branding — email increment 1: sender, magic-login, web template (2026-08-27)
+
+Increment 3 of the production branding work, scoped from the email audit. Rebrands the highest-visibility
+email surfaces — the From name every recipient sees in their inbox list, and the magic-login email — while
+leaving the 184 translated strings for a later increment.
+
+### Files
+
+- `apps/api/src/services/email/utils.py:391` — sender display name `LearnHouse <…>` → `LearnOrbit <…>`.
+  `send_email()` is the single choke point for all 12 API email types, so this one line rebrands every
+  transactional email at once. The address still comes from `mailing.system_email_address`; no config key
+  or env var name was touched.
+- `apps/api/src/services/auth/magic_login.py:127,129,131` — the three hardcoded English strings (subject
+  `Your LearnOrbit login link`, title `Sign in to LearnOrbit`, footer `…your LearnOrbit account.`).
+  Wording and structure preserved; only the brand token changed. This email is not translated, so these
+  literals are the whole surface.
+- `apps/web/components/Emails/LearnHouseEmail.tsx:136` — footer `LearnHouse — the open-source learning
+  platform.` → `LearnOrbit — …`. LearnOrbit is AGPL-3.0, so the "open-source" claim stays accurate.
+- `apps/web/services/emails/resend.ts:31` — fallback sender display name → `LearnOrbit`.
+- `apps/api/src/tests/services/test_email_utils_service.py:300` — the one real sender assertion, updated
+  to `"from": "LearnOrbit <system@test.com>"`, kept explicit.
+
+Component/file names (`LearnHouseEmail.tsx`, `LearnHouseEmailProps`) were deliberately left alone — they
+are internal identifiers, and renaming them would touch importers for no user-visible gain.
+
+### Deliberately left unchanged — asset/destination gaps, not oversights
+
+- **`emails.py:39-43` `LOGO_SVG`** — the LearnHouse icon+wordmark embedded in the header of every API
+  email. **No LearnOrbit asset exists anywhere in the repo**: `apps/web/public/` holds only `lrn.svg`,
+  `lrn-text.svg`, `lrn-dash.svg`, `black_logo.png` and `learnhouse_*.png`, all LearnHouse marks. Rather
+  than invent a brand mark or hotlink an external URL, the gap is recorded. Verified concretely: a
+  rendered email contains 0 literal "LearnHouse" strings but still embeds the wordmark as SVG path data,
+  which no text search will catch — so this must be fixed from the asset side, not by grepping.
+- **`emails.py:35` `ACADEMY_URL = "https://university.learnhouse.io"`** — used at `:265` (footer "learn
+  more" link) and `:277` (last-resort CTA href). It is user-visible, but its link *text* is
+  `t(lang, "academy_link_text")` = "LearnHouse Academy", which lives in `translations.py` and is out of
+  scope. Repointing the URL alone would leave text reading "LearnHouse Academy" aimed at a LearnOrbit
+  destination — worse than leaving it. No verified LearnOrbit destination exists either. Left intact.
+- **`LearnHouseEmail.tsx:49,71`** — `LOGO_URL` hotlinks `https://www.learnhouse.io/learnhouse-dark.svg`,
+  and `alt="LearnHouse"` describes it. These are coupled: changing the alt alone would misdescribe the
+  image for screen readers, which is a correctness regression, not a rebrand. Both wait on a LearnOrbit
+  asset. Note this is a *remote* dependency on a LearnHouse-controlled domain.
+- **`resend.ts:31` address `hello@emails.learnhouse.app`** — display name rebranded, address left, because
+  inventing a production sending domain was out of scope. LearnOrbit does not own `learnhouse.app`, so
+  this fallback cannot send: Resend only accepts a domain verified on the sending account. It must be
+  supplied via `RESEND_FROM_EMAIL` before production. That path is SaaS-only and no-ops without
+  `RESEND_API_KEY`, so nothing is broken today.
+- `translations.py` (184 strings, 20 languages) — untouched, as scoped.
+
+### Verification
+
+- `pytest src/tests/services/test_email_utils_service.py test_emails_service.py
+  test_email_origin_and_smtp_tls.py test_email_unsubscribe_support.py src/tests/security/test_magic_login.py
+  src/tests/routers/test_auth_magic_link.py -q --no-cov` (via WSL) — **126 passed in 6.12s**.
+- The `test_emails_service.py` branding assertions (`"Welcome to LearnHouse"`, `"LearnHouse Academy"`,
+  `"Powered by LearnHouse"`, and the white-label negative assertions) were **left untouched and still
+  pass**: they assert `translations.py` values, which this increment does not change. Updating them would
+  have been wrong, not merely unnecessary.
+- `eslint components/Emails/LearnHouseEmail.tsx services/emails/resend.ts` — **0 errors**; 3 pre-existing
+  `no-console` warnings at `resend.ts:56,67,72`, untouched.
+- `tsc --noEmit` (whole web app) — **exit 0, zero diagnostics**.
+- Rendered a real email through `_email_layout()`: **0 literal "LearnHouse" strings**, LearnOrbit present,
+  logo SVG confirmed still embedded.
+- `git diff --check` clean; the diff is exactly 7 changed lines across 5 files, no strays.
+
+### Limitations
+
+- **Ruff not run** — it is not installed in `apps/api/.venv` and is not on PATH in WSL. It was not
+  installed just to run it. The Python changes are string-literal edits only.
+- Web `.test.mjs` suites still cannot run (`bun` unavailable); none cover email.
+- No live email was sent; delivery was not exercised end to end.
+
+### Security / behaviour confirmation
+
+Authentication, magic-link token generation/consumption/expiry, verification and reset token logic, the
+`_is_allowed_base_url` allowlist, `_configured_frontend_base_url()`, and all provider/SMTP/Resend delivery
+logic are **unchanged**. Every edit is a display string. The allowlist is host-based and reads no brand
+string, so branding edits cannot affect link building or validation.
+
+### Git
+
+- No commit made. Working tree on `learnorbit-v1` carries this increment plus the uncommitted legal-footer
+  and MFA increments.
+
+- **Next**: the 184-string `translations.py` rebrand across 20 languages, and — before production email —
+  a LearnOrbit logo asset plus sending-domain configuration (SPF/DKIM/DMARC). Not started.
+
+## Branding — email increment 2: LearnHouse logos removed from both email systems (2026-08-28)
+
+Increment 4 of the production branding work. Removes the last LearnHouse *artwork* from transactional
+email, replacing it with an interim styled HTML text wordmark in both email systems.
+
+### Files
+
+- `apps/api/src/services/users/emails.py:38-52` — the inline `LOGO_SVG` (LearnHouse icon + wordmark
+  lockup) replaced with an inline-styled `<span>` reading `LearnOrbit`. Typography matches the existing
+  `STYLES['h1']` (22px / weight 900 / -0.02em). The constant name `LOGO_SVG` was kept so all four
+  `logo_html` call sites (`:167` default, `:260`, `:270`, `:551`, `:760`) stay untouched; a comment
+  explains the now-inaccurate name. `_email_layout`'s docstring updated to match.
+- `apps/web/components/Emails/LearnHouseEmail.tsx` — `LOGO_URL` (a remote SVG on `learnhouse.io`)
+  deleted, `<Img … alt="LearnHouse">` replaced with `<Text style={WORDMARK_STYLE}>LearnOrbit</Text>`, and
+  the now-unused `Img` import removed. Layout, spacing (24px bottom margin) and the `LearnHouseEmail` /
+  `LearnHouseEmailProps` identifiers are unchanged, as scoped.
+- `apps/api/src/tests/services/test_emails_service.py` — **two** tests updated, not one:
+  `test_whitelabel_without_logo_falls_back_to_learnorbit_wordmark` (was `…learnhouse_mark`) and
+  `test_org_join_email_falls_back_to_learnorbit_wordmark_without_logo`. Both now assert
+  `"<svg" not in body` and `">LearnOrbit</span>" in body`, keeping the existing `"<img" not in body`.
+  The audit for this increment predicted only the first; the second did not contain the word "wordmark"
+  and was missed by grep — the test run caught it. Worth remembering: grep over test *names* is not a
+  reliable way to find assertions about behaviour.
+
+### Why text rather than an image
+
+No LearnOrbit image asset exists anywhere in the repo (verified by a full filesystem sweep of `apps/`:
+the only "orbit"-named files are four Python rate-limit tests), and emails cannot use relative URLs, so
+even a self-hosted asset would need a production domain that is not yet configured. Text also *fixes* a
+pre-existing rendering bug: both systems used SVG (inline in the API, remote in the web template), which
+Gmail, Outlook desktop and Yahoo strip — most recipients were seeing an empty header, so the old logo was
+failing as well as mis-branded. base64/data URIs are blocked by the same clients and were not an option.
+
+This is explicitly interim: swap for an `<img>` once a real logo asset and a controlled sending domain
+exist. Both comments say so at the point of change.
+
+### Verification
+
+- `pytest src/tests/services/test_emails_service.py test_email_utils_service.py
+  test_email_urls_without_request.py test_email_unsubscribe_support.py test_email_origin_and_smtp_tls.py
+  src/tests/security/test_magic_login.py -q --no-cov` (via WSL) — **137 passed in 3.09s**.
+- `eslint components/Emails/LearnHouseEmail.tsx` — **0 errors, 0 warnings**.
+- `tsc --noEmit` (whole web app) — **exit 0, zero diagnostics**.
+- Rendered a real API email: wordmark present; `<svg>` **False**, `<img>` **False**, `data:image`
+  **False**, external host **False**.
+- `emails.py` shrank 35,704 → 27,592 bytes and `grep -c "<path d="` returns **0** — the artwork is
+  genuinely gone, not merely invisible to text search (the trap this increment's audit called out).
+- Web template: `LOGO_URL`, `<Img`, and `alt=` all absent; remaining `LearnHouse` hits are the internal
+  component/prop identifiers and one explanatory comment.
+- `git diff --check` clean; 3 files, +45/−16.
+
+### Security / behaviour confirmation
+
+Presentation only. Unchanged: email delivery and provider logic, sender addresses, reply-to, token
+generation/validation, verification and reset links, `_is_allowed_base_url` URL allowlisting,
+authentication, and unsubscribe behaviour. No configuration, env var, or DNS change.
+
+### Remaining user-visible LearnHouse branding (not fixed)
+
+- `emails.py:35` `ACADEMY_URL = "https://university.learnhouse.io"` — still deferred; its link text
+  `academy_link_text` = "LearnHouse Academy" lives in `translations.py`.
+- `translations.py` — 184 strings across 20 languages, including "Powered by LearnHouse", which the
+  updated tests still assert (correctly — this increment does not touch them).
+- Stale comments in `emails.py:75,78,253-255,533` that describe the old LearnHouse mark. Left alone to
+  keep the diff tight; they are comments only.
+- Outside email: `home.tsx:98` `alt="LearnHouse"`, the orphaned `common.powered_by` string, the embed
+  `PoweredByBadge`, page titles, and `AuthBrandingPanel`.
+
+### Git
+
+- No commit made. Working tree on `learnorbit-v1` carries this increment plus the uncommitted legal-footer,
+  MFA and email-increment-1 work.
+
+- **Next**: the 184-string `translations.py` rebrand. Separately, before production email: a LearnOrbit
+  logo asset, a verified sending domain, and SPF/DKIM/DMARC. Not started.
+
+## Branding — email increment 3: translations rebranded across 20 languages (2026-08-28)
+
+Increment 5 of the production branding work. Replaces the brand token in every user-visible email string,
+completing the email rebrand apart from the deferred `ACADEMY_URL`.
+
+### Files
+
+- `apps/api/src/services/email/translations.py` — **184 translation values changed across all 20
+  languages** (en=13, the other 19 at 9 each: fr de es ar ja pt ru zh hi ko it tr vi id pl uk nl th bn).
+  Only the brand token `LearnHouse` → `LearnOrbit`; no sentence was translated or rewritten. Each locale
+  kept its own grammar and punctuation — e.g. `Propulsé par LearnOrbit` (fr),
+  `Bereitgestellt von LearnOrbit` (de), `Con la tecnología de LearnOrbit` (es, inverted ¡ intact),
+  `Bienvenue sur LearnOrbit, {username} !` (fr narrow-space before `!`),
+  `LearnOrbitへようこそ、{username}さん！` (ja).
+- `apps/api/src/tests/services/test_emails_service.py` — 3 tests updated where they asserted the old
+  user-visible copy: `test_orgless_welcome_uses_cta_url_and_platform_branding` (renamed from
+  `…_learnhouse_branding`), `test_welcome_is_whitelabeled_when_org_supplied`, and the
+  powered-by assertion in `test_whitelabel_without_logo_falls_back_to_learnorbit_wordmark`. Assertions
+  stayed explicit and equally strict — including the negative white-label ones, which were updated to the
+  new strings rather than left trivially true.
+
+### Why a blanket token replace was provably safe here
+
+Classified every occurrence before touching the file: all 184 were the exact token `LearnHouse` (zero
+lowercase variants, therefore no URLs), each on its own `"key": "value"` line, none in a dictionary key,
+comment, identifier or `LEARNHOUSE_*` name. That made a scoped `s/LearnHouse/LearnOrbit/g` equivalent to
+184 individual value edits.
+
+### Verification
+
+- **Brand-token-only proof**: reverting `LearnOrbit`→`LearnHouse` across the diff's added lines reproduces
+  the 184 removed lines **byte-identically** — wording, grammar, punctuation, HTML and placeholders all
+  untouched.
+- **Placeholders preserved**: 465 total before and after, same distribution — `{org_name}` 244,
+  `{username}` 140, `{inviter}` 40, `{role}` 20, `{academy_link}` 20, `{}` 1. `<strong>`/`</strong>` 80/80.
+- Module imports cleanly; 20 languages load; interpolation verified live in en/fr/ja/ar.
+- `git diff --numstat` = **184/184** — one line changed per occurrence, none added or removed.
+- `pytest` over the 8 email/magic-login test files — **163 passed**; after the round-trip below, the
+  translation + email-service + email-utils subset re-run clean at **69 passed**.
+- Repo-wide grep confirms no test anywhere still asserts `Welcome to LearnHouse`, `LearnHouse Academy`,
+  `Powered by LearnHouse` or `on LearnHouse`.
+- `git diff --check` clean.
+
+### Pre-existing failures — investigated, not caused here
+
+A broader `pytest src/tests/services/ src/tests/routers/` run gave **4078 passed, 25 skipped, 8 failed**
+(651s). The 8 are in `test_custom_domains_service.py` (3), `test_org_invites_service.py` (3) and
+`test_podcasts_service.py` (2) — an `ACCOUNT_TOO_NEW` age-guard status mismatch (403 vs 500) and empty
+listing sets, neither of which a string change in email copy can reach.
+
+Rather than assert that, it was proven: `translations.py` was temporarily restored to its HEAD version
+(working copy backed up first) and the **same 8 tests failed identically**, then the modified file was
+restored and re-verified (184 `LearnOrbit`, 0 `LearnHouse`, 90,103 bytes, diff back to 184/184).
+**These failures are pre-existing and unrelated to any branding increment.**
+
+### Remaining / deferred
+
+- `apps/api/src/services/users/emails.py:35` `ACADEMY_URL = "https://university.learnhouse.io"` — still
+  the one user-visible LearnHouse item left in email. Its link *text* is now "LearnOrbit Academy" in all
+  20 languages, so the label and destination no longer agree; it needs a real LearnOrbit destination,
+  which does not exist. This is now the more visible of the two halves and should be resolved next.
+- `translations.py` contains **0** remaining `LearnHouse` occurrences of any kind.
+- Stale comments in `emails.py:75,78,253-255,533` still describe the old mark; comments only.
+- Outside email, unchanged: `home.tsx:98` `alt="LearnHouse"`, the orphaned `common.powered_by`, the embed
+  `PoweredByBadge`, page titles, `AuthBrandingPanel`.
+- Before production email: a LearnOrbit logo asset, verified sending domain, SPF/DKIM/DMARC.
+
+### Git
+
+- No commit made. Working tree on `learnorbit-v1` carries this increment plus the uncommitted
+  legal-footer, MFA, and email increments 1–2.
+
+- **Next**: resolve `ACADEMY_URL`, then the non-email UI branding items above. Not started.
+
+## Branding — ACADEMY_URL link removed from the welcome email (2026-08-28)
+
+Closes the item left dangling by increment 3. After the translation rebrand the link *text* read
+"LearnOrbit Academy" in all 20 languages while the href still pointed at `university.learnhouse.io` —
+label and destination disagreed. Resolved by removing the link rather than inventing a destination.
+
+### Files
+
+- `apps/api/src/services/users/emails.py`
+  - `ACADEMY_URL = "https://university.learnhouse.io"` and its comment **deleted**.
+  - **Org-less footer removed** (`footer_note = ""`). That footer existed only to host the Academy link;
+    with no LearnOrbit destination there is nothing for "Need help? Visit ___ to learn the basics." to
+    say. `_email_layout` already omits the whole footer block when `footer_note` is empty, so no layout
+    change was needed. The white-labeled branch still shows "Powered by LearnOrbit", unchanged.
+  - **CTA button is now conditional.** It previously fell back to `ACADEMY_URL` when `cta_url` was
+    unresolved — and that is a live path, not dead code: `_get_welcome_cta_url()` documents "Returns None
+    if no URL can be resolved, letting the caller fall back", and both production call sites pass its
+    result. With the fallback gone the button is omitted rather than rendered with an empty or arbitrary
+    href, since a button linking nowhere is worse than no button.
+  - Docstring updated to describe the new behaviour.
+- `apps/api/src/tests/services/test_emails_service.py` — two tests updated to the new contract:
+  - `test_send_account_creation_email_escapes_username` (called without `cta_url`) now asserts
+    `"Get Started" not in body` **and** `"<a href" not in body` — that variant should contain no links at
+    all.
+  - `test_orgless_welcome_uses_cta_url_and_platform_branding` drops the Academy assertion and instead
+    guards `"Academy" not in body` and `"learnhouse" not in body.lower()`, so neither the dead link nor
+    the LearnHouse host can return.
+
+### Verification
+
+- Rendered both variants directly:
+  - **with `cta_url`** → 1 anchor (the CTA), "Get Started" present, no `learnhouse`, no "Academy".
+  - **without `cta_url`** → 0 anchors, no button, no `learnhouse`.
+- `pytest` over the 8 email/magic-login files — **163 passed**.
+- Consumers of the account-creation email (`test_signup_custom_fields_flow.py`, `test_orgs_service.py`,
+  `test_users_service.py`, `test_auth_router.py`) — **107 passed** (pre-existing `RuntimeWarning`s in
+  `test_auth_router` unrelated).
+- `grep` confirms **no `ACADEMY_URL` reference and no `learnhouse.` URL anywhere in `emails.py`**.
+- `git diff --check` clean.
+
+### Left in place deliberately
+
+- The `account_creation.footer` and `academy_link_text` translations (20 languages each) are now **unused**
+  but retained, so the footer can be restored verbatim if a LearnOrbit learning-resources destination ever
+  exists. A comment at the removal site says so.
+- `emails.py:536` — a docstring reading "welcomed into that academy, not onto LearnHouse". Prose about the
+  platform, unrelated to the removed constant; still brand-stale, along with the comments at
+  `:75,:78,:253-255` noted previously.
+
+### Remaining user-visible LearnHouse branding
+
+**Email is now clean** — no LearnHouse strings, URLs, or artwork in any transactional email. Outstanding
+elsewhere: `home.tsx:98` `alt="LearnHouse"`, the orphaned `common.powered_by` locale string, the embed
+`PoweredByBadge`, page titles, and `AuthBrandingPanel`. Before production email: a LearnOrbit logo asset,
+a verified sending domain, and SPF/DKIM/DMARC.
+
+### Git
+
+- No commit made. Working tree on `learnorbit-v1` carries this plus the uncommitted legal-footer, MFA and
+  email increments 1-3.
+
+- **Next**: the non-email UI branding items above. Not started.
+
+## Branding — nudge email subjects rebranded across 20 languages (2026-08-28)
+
+Closes the gap found by the final branding audit: the earlier email increments covered
+`services/email/translations.py` but missed its sibling package `nudge_translations/`, so the
+reactivation nudge email still went out with a LearnHouse subject line. Email had been reported as clean;
+it was not. It is now.
+
+### Files
+
+- `apps/api/src/services/email/nudge_translations/{ar,bn,de,en,es,fr,hi,id,it,ja,ko,nl,pl,pt,ru,th,tr,uk,vi,zh}.py`
+  — **20 files, one line each**. Only the value of `nudge.reactivation.whats_changed.subject` changed,
+  brand token `LearnHouse` → `LearnOrbit`. No sentence was translated or rewritten; each language kept its
+  own wording, particles and punctuation (e.g. `Auf LearnOrbit hat sich einiges getan`,
+  `Quelques nouveautés sur LearnOrbit`, `LearnOrbit에 몇 가지가 바뀌었습니다`, `В LearnOrbit кое-что изменилось`).
+  No other key, file, module, constant or import was touched.
+
+### Verification
+
+- All 20 language modules imported individually plus via the package: **20 modules OK**,
+  `NUDGE_TRANSLATIONS` loads 20 languages; 0 languages still contain `LearnHouse` on that key, 20 contain
+  `LearnOrbit`.
+- `pytest` over the 13 nudge test files plus `test_email_unsubscribe_support.py`,
+  `test_emails_service.py` and `test_email_translations.py` — **522 passed in 44.71s**.
+- `git diff --numstat` = **1/1 on each of the 20 files** — one line changed per file, none added or removed.
+- **Brand-token-only proof**: reverting `LearnOrbit`→`LearnHouse` across the diff's added lines reproduces
+  the 20 removed lines byte-identically.
+- `grep` confirms **0** remaining `LearnHouse` occurrences anywhere in `nudge_translations/`.
+- `git diff --check` clean.
+
+Nothing could not be run: the nudge suite is pure-Python and ran in full. (Ruff remains unavailable in
+this environment and was not installed; the change is a string-literal edit.)
+
+### Open question flagged, not acted on — Turkish grammar
+
+`tr.py` now reads `LearnOrbit'ta birkaç şey değişti`. Turkish vowel harmony makes that suffix wrong for
+the new name: the locative attaches by the final vowel, so `LearnHouse'ta` (back vowel) should become
+**`LearnOrbit'te`** (front vowel `i`, after voiceless `t`). Left as the strict brand-token replacement
+because changing it edits a character outside the brand token, which this increment explicitly excluded.
+It is a one-character fix awaiting confirmation, ideally from a Turkish speaker. Every other language
+attaches the brand as a separate word or with an invariant particle (Korean `에`, Bengali `-এ`), so none
+of the others are affected.
+
+### Git
+
+- No commit made. Working tree on `learnorbit-v1` carries this plus the uncommitted legal-footer, MFA and
+  email increments.
+
+- **Next**: per the final audit — page titles, locale UI strings, LearnHouse URLs, and (the long pole,
+  worth starting in parallel) a LearnOrbit logo asset set. Not started.
+
+## Branding — Turkish vowel-harmony suffixes corrected (2026-08-28)
+
+Resolves the open question flagged in the previous entry, and extends the fix to five further instances of
+the same defect found while checking. Supersedes that entry's "Open question flagged, not acted on" section.
+
+### The defect
+
+Turkish attaches case suffixes directly to the noun, and the suffix vowel must harmonise with the noun's
+final vowel. `LearnHouse` ends in a back vowel, so it took `-a` / `-ta`. `LearnOrbit` ends in the front
+vowel `i` (and a voiceless `t`), so it requires `-e` / `-te`. The earlier blanket brand-token replacements
+swapped the noun but left the old suffixes, producing ungrammatical Turkish in user-visible email
+subjects and bodies.
+
+### Files
+
+- `apps/api/src/services/email/nudge_translations/tr.py:170` — `LearnOrbit'ta` → `LearnOrbit'te`.
+- `apps/api/src/services/email/translations.py` — **5 further strings** in the `tr` block, missed when the
+  issue was first raised because only the nudge file had been inspected:
+  - `:597` `account_creation.subject` — `LearnOrbit'a` → `LearnOrbit'e` (dative)
+  - `:616` `invitation.intro` — `LearnOrbit'taki` → `LearnOrbit'teki` (locative + `-ki`)
+  - `:626` `org_join.footer` — `LearnOrbit'ta` → `LearnOrbit'te` (locative)
+  - `:632` `role_changed.footer` — `LearnOrbit'taki` → `LearnOrbit'teki`
+  - `:637` `email_verification.body` — `LearnOrbit'a` → `LearnOrbit'e`
+
+Only suffix vowels changed; no wording, placeholder or markup was touched. Turkish is the only affected
+language — every other locale attaches the brand as a separate word or with an invariant particle
+(Korean `에`, Bengali `-এ`), confirmed by searching for apostrophe-suffixed occurrences across the API and
+web locales.
+
+### Verification
+
+- `grep` for `LearnOrbit'a` / `LearnOrbit'ta` / `LearnOrbit'taki` across `apps/api/src` — **none remain**.
+- Rendered the affected Turkish strings live: `LearnOrbit'e hoş geldin, Ada!`,
+  `Bu e-postayı LearnOrbit'te Acme organizasyonuna katıldığınız…`, `LearnOrbit'te birkaç şey değişti`;
+  interpolation intact.
+- Placeholder count in `translations.py` still **465**; `git diff --numstat` still **184/184** for
+  `translations.py` and **1/1** for `nudge_translations/tr.py` — the corrections land inside lines already
+  changed, adding no new diff surface.
+- `pytest` over the translation, email-service, email-utils and nudge suites — **241 passed in 6.63s**.
+- `git diff --check` clean.
+
+### Note for future brand work
+
+A blanket token replacement is safe for the *text* of a translation but not necessarily for its
+*morphology*. Agglutinative languages (Turkish here; Finnish, Hungarian, Korean and Japanese are the same
+family of risk) attach grammar to the brand name itself, so any future rename must re-check suffixed
+forms rather than trusting a byte-level equivalence proof — which passed cleanly here while the Turkish
+was still wrong.
+
+### Git
+
+- No commit made.
+
+- **Next**: unchanged — page titles, locale UI strings, LearnHouse URLs, and a LearnOrbit logo asset set.
+
+## Branding — Page titles & user-visible admin headings (2026-08-28)
+
+Picks up the first item of the previous entry's "Next": page titles. Metadata-only brand swap plus the two
+adjacent visible headings that would otherwise contradict the rebranded titles. Locale UI strings,
+LearnHouse URLs and logo assets remain untouched and still open.
+
+### Scope
+
+`LearnHouse` → `LearnOrbit` in user-visible title/description strings only. Dynamic org-name fallbacks
+(`org?.name || 'LearnOrbit'`) keep their structure — only the fallback literal changed. No branding
+constant or helper introduced; no routing, auth, SEO, OpenGraph or metadata-generation logic touched; no
+files, components, variables or `LEARNHOUSE_*` env names renamed.
+
+### Files
+
+Web metadata (`generateMetadata` / `metadata`):
+- `apps/web/app/auth/login/page.tsx:12,26` — apex title + org fallback
+- `apps/web/app/auth/signup/page.tsx:13,24`
+- `apps/web/app/auth/reset/page.tsx:13,27`
+- `apps/web/app/auth/forgot/page.tsx:11,25`
+- `apps/web/app/auth/verify-email/page.tsx:13,27`
+- `apps/web/app/admin/layout.tsx:13,14` — `%s | LearnOrbit Admin`, default `LearnOrbit Admin`
+- `apps/web/app/orgs/[orgslug]/dash/layout.tsx:6` — `LearnOrbit Dashboard`
+- `apps/web/app/orgs/(withmenu)/[orgslug]/copilot/page.tsx:22` — description, `LearnOrbit Copilot`
+- `apps/web/app/orgs/(withmenu)/[orgslug]/course/[courseuuid]/page.tsx:39,40` — course title fallback and
+  `View this course on LearnOrbit`
+
+Adjacent visible headings:
+- `apps/web/app/admin/login/page.tsx:44` — `<h1>LearnOrbit Admin</h1>`
+- `apps/api/src/routers/admin.py:949` — magic-link error page `<title>Sign-in link — LearnOrbit</title>`
+
+The module docstring at `admin.py:2` still reads "LearnHouse" — a non-user-visible stale comment,
+deliberately left for the comment sweep.
+
+### Verification
+
+- ESLint over all 10 changed `.tsx` files — 0 errors; 1 pre-existing warning
+  (`admin/login/page.tsx:30`, `no-location-assign-relative-destination`, unrelated to this change).
+- `npx tsc --noEmit` in `apps/web` — clean, exit 0.
+- `pytest src/tests/routers/test_admin_router.py` — **10 passed in 5.41s**.
+- `grep -rn "LearnHouse"` across the 10 scoped `.tsx` files — **no matches remain**; `LearnOrbit` confirmed
+  present in all 17 replaced strings.
+- `git diff --check` clean; `git diff --stat` shows 11 files, 19/19 — no unrelated changes.
+- Not run: browser verification (metadata/title-only change, nothing to exercise beyond the rendered
+  `<title>`); no `bun`/`uv` on the Windows host, so all checks were run inside WSL.
+
+### Git
+
+- No commit made.
+
+- **Next**: locale UI strings (`apps/web/locales/*.json`) — the largest remaining branding surface. Then
+  LearnHouse URLs and the LearnOrbit logo/favicon asset set.
+
+## Branding — Locale UI strings (2026-08-28)
+
+Second item of the branding "Next" list: the user-visible brand token in `apps/web/locales/*.json`.
+Key-path–scoped, not a file-wide replacement — import/export format names, `learnhouse.io` session-sharing
+copy and the showcase strings were left untouched on purpose (see Deliberately excluded).
+
+### Scope — 12 key paths × 22 locales, 261 string values changed
+
+- `common.help_menu.website`, `common.help_menu.feedback_description`
+- `auth.image_title_login`, `auth.image_title_signup`
+- `embed.powered_by`
+- `dashboard.home.learnhouse_university` (key name unchanged)
+- `dashboard.organization.settings.watermark_label`, `.watermark_desc`
+- `onboarding.welcome.title`, `onboarding.steps.teach_the_world.description`, `.university`
+- `hub_new.createOrg.testHint.suffix`
+
+Every locale keeps its own wording, grammar, punctuation and interpolation — only the brand token moved.
+No key was added, renamed or removed; English was not written over any translation.
+
+### Files
+
+- `apps/web/locales/*.json` — all 22 files. 12 values each, except `ar`, `bn`, `hi` (11 — see below).
+- `apps/web/app/auth/login/login.tsx:442` and `apps/web/app/auth/signup/signup.tsx:67` — the hardcoded
+  `defaultValue` fallbacks behind `auth.image_title_login` / `auth.image_title_signup`, updated together
+  with the locale values so the fallback can't reintroduce the old brand.
+
+### Grammatical inflection (same standard as the email-translation work)
+
+A literal token swap would have left ungrammatical text in two languages; both were corrected inside the
+already-changed values.
+
+- **Turkish** (5 strings) — `LearnOrbit` ends in the front vowel `i` and voiceless `t`, so back-vowel
+  suffixes had to harmonise: `LearnOrbit'u` → `'i` (accusative, ×2), `LearnOrbit'a` → `'e` (dative, ×2),
+  `LearnOrbit'dan` → `'ten` (ablative, with d→t assimilation).
+- **Korean** (3 strings) — `LearnHouse` (…하우스) ends in a vowel, `LearnOrbit` (…오르빗) in a consonant,
+  which flips the particle allomorph: `LearnOrbit로` → `으로`, `LearnOrbit를` → `을` (×2). Particles that
+  are invariant here (`에`) were left alone, as were Bengali `-এ` and Japanese `へ/を`.
+- Checked and needing nothing: ar, fa, hi (separate prepositions/postpositions), ru/uk/pl/sk (Latin-script
+  brand left undeclined, as before), pt (`o/ao/do LearnOrbit`, same gender), ja, zh, th, vi, id.
+
+### Flagged, not guessed
+
+`dashboard.home.learnhouse_university` is a *transliterated* brand in three locales — `جامعة ليرن هاوس`
+(ar), `লার্নহাউস ইউনিভার্সিটি` (bn), `लर्नहाउस विश्वविद्यालय` (hi). Rendering "LearnOrbit" in those
+scripts is a naming decision, not a token swap, so all three were left as-is for a native-speaker call.
+Note `ar` and `hi` are internally inconsistent already: their `onboarding…university` value uses the Latin
+brand (now `LearnOrbit`) while `dashboard.home` uses the transliteration.
+
+### Deliberately excluded (still LearnHouse, by instruction)
+
+`courses.import.learnhouse_*` (4 keys) and `dashboard.courses.import_learnhouse*` (2) — compatibility
+format names for LearnHouse course exports; `dashboard.organization.security.session_sharing_label/hint`
+(learnhouse.io, 2 locales); `dashboard.organization.settings.showcase_explore` / `showcase_description`
+("LearnHouse Explore", 9 locales); `common.plans.feature_restricted.api_access.description` (bn only).
+The last two groups are user-visible and will need a product decision — they name a hosted service/community,
+not this deployment.
+
+### Verification
+
+- All 22 locale JSON files parse (`json.load`) after the edit; 2-space indentation, key order, LF endings
+  and escaping preserved (values re-emitted with `json.dumps(..., ensure_ascii=False)`).
+- Structural diff vs `HEAD`: **key sets identical** in all 22 files — no key added, dropped or renamed.
+- Value diff vs `HEAD` outside the 12 scoped paths: only `common.copyright` (22), `auth.terms_text` (10)
+  and `user.settings.security.mfa.codes_file_header` (2) — all from the earlier, already-documented
+  legal-footer and MFA increments, untouched by this pass.
+- Remaining-occurrence scan: every surviving `LearnHouse` / `learnhouse.io` string maps to one of the
+  excluded keys listed above — no scoped surface left behind.
+- ESLint on the two changed `.tsx` — 0 errors; 2 pre-existing warnings (`react-hooks/set-state-in-effect`,
+  unrelated lines).
+- `npx tsc --noEmit` in `apps/web` — clean, exit 0.
+- `bun test tests/rtl-guard.test.mjs` (the only locale-consuming suite) — **9 pass, 0 fail** with
+  `--timeout 120000`. At bun's default 5s timeout the `ar.json covers every en.json key` case times out at
+  ~32s; that is filesystem slowness reading the locale set over the WSL/UNC mount, not a content failure —
+  the same case passes on the raised timeout.
+- `git diff --check` clean. `git diff --numstat` for the locales: 13–15 changed lines per file, matching
+  12 scoped values plus the earlier increments' 1–3.
+
+### Git
+
+- No commit made.
+
+- **Next**: LearnHouse URLs (docs/support links, `learnhouse.io` references), then the LearnOrbit
+  logo/favicon asset set. The showcase / "LearnHouse Explore" and import-format strings stay open pending
+  the product decisions noted above.
+
+## Branding — Remaining user-visible LearnHouse URLs (2026-08-28)
+
+Third branding item: the hardcoded LearnHouse destinations behind user-visible links. Same principle as the
+`ACADEMY_URL` removal — where no LearnOrbit destination exists, the link goes away rather than pointing at a
+LearnHouse property or an invented URL. Nothing was repointed; no URL configuration infrastructure was added.
+
+### Inspected and changed
+
+- **`apps/web/components/Objects/Menus/OrgMenu.tsx`** — help dropdown (admins/maintainers/instructors only).
+  Both hardcoded items removed: `https://docs.learnhouse.app` (Documentation) and `https://learnhouse.app`
+  (Website). Now-unused `Book` / `Globe` icon imports dropped; a comment marks the restore point. The
+  dropdown keeps its Discord item and "Report feedback" action.
+- **`apps/web/components/Dashboard/Onboarding/OnboardingBar.tsx`** — the `teach_the_world` step's two link
+  cards removed: `https://university.learnhouse.io` (LearnHouse University) and
+  `https://classroom.learnhouse.io` (The Classroom), 42 lines. The step keeps its Done button, which is what
+  actually completes it — no onboarding flow change. The stale section comment above it was updated.
+- **`apps/web/components/Objects/StyledElements/Error/ErrorActions.tsx`** — `supportHref` was
+  `getPlatformUrl('/contact') || 'mailto:support@learnhouse.io'`. The configurable primary is preserved; only
+  the fallback is gone, and `case 'contact_support'` now returns null when nothing is configured, so the
+  button disappears instead of opening a mail draft to LearnHouse. `getPlatformUrl` returns null unless
+  `NEXT_PUBLIC_LEARNHOUSE_PLATFORM_URL` / `LEARNHOUSE_PLATFORM_URL` is set (env var names untouched), so on
+  an unconfigured deployment this button is now simply absent; three catalog entries and `OrgContext` request
+  the `contact_support` resolution and degrade cleanly.
+- **`apps/web/components/Objects/Watermark.tsx`** — the "Made with LearnOrbit" badge no longer links to
+  `www.learnhouse.app/?source=in-app`. The badge itself, and all its visibility rules (EE hidden / SaaS free
+  always on / admin toggle), are unchanged: the `<Link>` became a `<div>`, `cursor-pointer` dropped, `Link`
+  import removed.
+- **`apps/web/components/Objects/Menus/OrgMenuChrome.tsx`** — the org footer mark no longer links to
+  `https://learnhouse.app`; `<Link>` wrapper and import removed, `cursor-pointer` dropped, and the
+  `showWatermark` condition preserved exactly.
+- **`apps/api/src/routers/admin.py`** — `_support_url()` returned a hardcoded `mailto:hello@learnhouse.app`
+  for the magic-link error page. It now returns `Optional[str] = None`, and `_render_magic_link_error`
+  renders the support anchor conditionally (`support_block`), so the 410 page shows title, message and hint
+  with no dead link. The endpoint `description=` was corrected to match. The `.support` CSS rule is retained
+  for when a real address exists.
+
+### Left unchanged deliberately
+
+- **`apps/web/components/Dashboard/Pages/Users/Security/OrgSignInMethods.tsx`** — untouched, per instruction.
+  See the product decision below.
+- `https://discord.gg/learnhouse` in the same help dropdown, plus the same docs/website links duplicated in
+  `DashLeftMenu.tsx` and `DashMobileMenu.tsx`, `AuthBrandingPanel.tsx` (`learnhouse.app`),
+  `PricingGrid.tsx` / `PricingCards.tsx` (`learnhouse.app/contact?subject=business`),
+  `OrgEditAPIAccess.tsx` (`mailto:hello@learnhouse.app`) and `services/emails/transactional.ts` — the same
+  class of dead destination, but outside this increment's stated surface list. They should be handled the
+  same way in a follow-up.
+- All host/domain **logic**: `hostUtils.ts`, `services/auth/redirects.ts` (redirect allowlisting),
+  `services/config/config.ts`, the token-exchange route, `LEARNHOUSE_*` env vars, `showlearnhouselogo`,
+  import/export format names and API contracts.
+- `alt="LearnHouse"` on the footer mark and the `/lrn.svg`, `/lrn-text.svg`, `/UNI_LOGO.png`,
+  `/theclassroom.png` assets — asset/alt-text branding is a separate increment.
+
+### OrgSignInMethods — product decision required (code unchanged)
+
+- **What it controls.** The toggle writes `allow_central_session_sharing` into the org config
+  (`apps/api/src/routers/mfa.py` → `security` blob; read by `apps/api/src/services/orgs/auth_policy.py`).
+  Enforcement is purely provenance-based: every session records the org it was minted for (`sorg`), and when
+  sharing is off, a request whose `provenance.org_id != org_id` is refused with `SESSION_NOT_BOUND_CODE`.
+  Superadmins and API-token sessions are exempt; evaluation fails open. **The string "learnhouse.io" appears
+  only in the label and hint — never in the logic.**
+- **Is it meaningful for LearnOrbit?** Yes, and it is safe. It isolates sessions between the apex/hub and an
+  org, and between two orgs, on whatever domain the deployment runs. The label is what is stale, not the
+  control: it names a domain LearnOrbit does not own.
+- **When platform-domain config is absent.** Nothing breaks. The control is backend-enforced and does not
+  read any platform-URL setting; with `tenancy: single` (local dev, OSS) there is only one org, so a foreign
+  `sorg` never occurs and the toggle is inert but harmless. Default is `True` = today's behaviour.
+- **Recommendation.** Keep it visible and enabled, and **reword** the label/hint to name the deployment
+  rather than a hardcoded domain — e.g. "Allow sharing sessions with the main site" / "…signing in on the
+  main site won't let members into this org…", or interpolate the configured top domain. Hiding or disabling
+  it would remove a working security control. Reword is a copy change across 22 locales plus the two
+  `defaultValue` fallbacks, so it is deferred pending your decision. Also stale for the same reason:
+  `components/Dashboard/Pages/Users/Security/shared.tsx:55` (comment) and
+  `components/Objects/Banners/OrgMFAPolicyGate.tsx:311` (comment).
+
+### Verification
+
+- ESLint on all 5 changed `.tsx` — 0 errors. Pre-existing warnings only (`react-hooks/set-state-in-effect` in
+  `OrgMenu.tsx:118`, `no-location-assign-relative-destination` in `ErrorActions.tsx:96`), both on untouched
+  lines. (An intermediate JSX-comment placement error in `OrgMenuChrome.tsx` was caught by this run and
+  fixed; the file lints clean.)
+- `npx tsc --noEmit` in `apps/web` — clean, exit 0.
+- `ruff check src/routers/admin.py` — clean.
+- `pytest src/tests/routers/test_admin_router.py src/tests/services/test_admin_service_extra.py` —
+  **39 passed in 23.36s**. No test asserted on `_support_url` or the error-page HTML.
+- Rendered the magic-link error page directly: status **410**, **0 anchors**, no `learnhouse` string,
+  `LearnOrbit` title present.
+- `bun test tests/responsive-guard.test.mjs tests/a11y-guard.test.mjs` (the suites that scan these
+  components) — **42 pass, 0 fail**.
+- `grep` over the 5 changed `.tsx`: none of `docs.learnhouse.app`, `learnhouse.app`, `www.learnhouse.app`,
+  `university.learnhouse.io`, `classroom.learnhouse.io`, `support@learnhouse.io` remain. In `admin.py` the
+  only surviving `hello@learnhouse.app` is inside the docstring explaining why it was removed.
+- `git diff --check` clean; diff reviewed — no unrelated URL, style or branding string touched.
+
+### Git
+
+- No commit made.
+
+- **Next**: the same dead-destination cleanup in the surfaces listed under "Left unchanged" (DashLeftMenu,
+  DashMobileMenu, AuthBrandingPanel, pricing CTAs, `OrgEditAPIAccess`, `transactional.ts`), then the
+  LearnOrbit logo/favicon asset set. The OrgSignInMethods reword waits on the decision above.
+
+## Branding — Remaining user-visible LearnHouse URLs, part 2 (2026-08-28)
+
+Finishes the dead-destination sweep started in the previous increment, over the surfaces that entry listed as
+"left unchanged". Same rule throughout: nothing invented, an existing configurable destination used where one
+already exists, otherwise the link/action is removed.
+
+### Files changed (7, all web)
+
+- **`components/Dashboard/Menus/DashLeftMenu.tsx`** — help hover-menu: removed `https://docs.learnhouse.app`
+  (Documentation), `https://learnhouse.app` (Website) and `https://discord.gg/learnhouse` (Discord), plus the
+  separator that only divided them from "Report feedback". Unused `Book` and `DiscordIcon` imports dropped;
+  `Globe` kept (still used by the language menu). All other navigation untouched.
+- **`components/Dashboard/Menus/DashMobileMenu.tsx`** — same two of those destinations present here
+  (`docs.learnhouse.app`, `discord.gg/learnhouse`) removed; `Book` / `DiscordIcon` imports dropped. The
+  language section and "Report feedback" button are unchanged.
+- **`components/Objects/Menus/OrgMenu.tsx`** — removed the remaining `https://discord.gg/learnhouse` item
+  (the docs/website items in this menu went in the previous increment) and the now-unused `DiscordIcon`
+  import. "Report feedback" untouched.
+- **`components/Dashboard/Pages/Org/OrgEditAPIAccess/OrgEditAPIAccess.tsx`** — the support button's
+  `mailto:hello@learnhouse.app` replaced with the **existing configurable** destination
+  `getPlatformUrl('/contact')`, and the button is wrapped in `{supportHref && …}` so it disappears when no
+  platform URL is configured rather than falling back. `title="Contact LearnHouse support"` → `"Contact
+  support"`. Same pattern as `ErrorActions.tsx` in the previous increment.
+- **`app/(hub)/billing/_components/PricingGrid.tsx`** — Enterprise "Talk to us" CTA moved from
+  `https://learnhouse.app/contact?subject=business` to `getPlatformUrl('/contact?subject=business')`, rendered
+  only when configured. Plan data, price maths, toggles and card rendering untouched.
+- **`app/(hub)/new/_components/PricingCards.tsx`** — identical treatment for the same CTA. The
+  `renderEnterpriseCta` override still takes precedence exactly as before; only the built-in fallback is now
+  conditional. (The file's header note about never importing `@services/billing/*` still holds —
+  `@services/config/config` is a config helper, not billing.)
+- **`services/emails/transactional.ts`** — welcome mail's `cta: { label: 'Get started', href:
+  'https://www.learnhouse.io/home' }` removed. `cta` is optional in `LearnHouseEmailProps` and the template
+  renders the button only when present, so the mail is simply button-less. (Note: neither
+  `sendWelcomeAccountMail` nor `sendContactMail` currently has a call site.)
+
+`apps/api/src/services/emails/transactional.py` does **not exist** — the transactional module is the web-side
+`services/emails/transactional.ts` above. No Python file changed in this increment.
+
+### Deliberately retained
+
+- **`services/emails/transactional.ts:34` — `to || 'hello@learnhouse.app'`.** This is the *recipient* of
+  contact-form mail, not a user-visible link; blanking it would break delivery. Needs a LearnOrbit ops inbox,
+  which is email/DNS work (out of scope here).
+- **`services/emails/resend.ts:31` — `RESEND_FROM_EMAIL` default `LearnOrbit <hello@emails.learnhouse.app>`.**
+  Sender identity tied to a verified sending domain; email/DNS work.
+- **`components/Auth/AuthBrandingPanel.tsx:148` — `<Link href="https://learnhouse.app">`.** Still live and
+  user-visible, but outside this increment's file list and previously deferred with the auth branding panel.
+  **This is now the last known user-visible LearnHouse URL in the web app.**
+- Non-user-visible references: `app/api/auth/token-exchange/route.ts:12` (comment), `services/config/config.ts:193`
+  (doc-comment example), `services/utils/ts/hostUtils.ts` (docstring examples), `services/auth/redirects.ts`
+  (allowlisting), and `apps/api/src/services/email/utils.py:122,138,241` (comments inside URL allowlisting).
+  Untouched per the security/compatibility rules, along with `LEARNHOUSE_*` env vars, `showlearnhouselogo`,
+  import/export format names, cookies, CSS classes and migration IDs.
+
+### Verification
+
+- ESLint on all 7 changed files — **0 errors**; one pre-existing warning
+  (`OrgMenu.tsx:117 react-hooks/set-state-in-effect`, untouched line).
+- `npx tsc --noEmit` in `apps/web` — clean, exit 0. (Also confirms no dangling `Book`/`DiscordIcon` reference
+  after the import removals.)
+- `bun test tests/responsive-guard.test.mjs tests/a11y-guard.test.mjs tests/rtl-guard.test.mjs` — **51 pass,
+  0 fail** (`--timeout 120000`; the `ar.json` case needs ~32s on this mount, as recorded previously). No test
+  or e2e spec references the removed links, `DashLeftMenu`, `DashMobileMenu`, `PricingGrid`, `PricingCards`,
+  `OrgEditAPIAccess` or `transactional`.
+- No Python file changed → no ruff/pytest run for this increment.
+- Targeted scan of the changed + previously-changed surfaces for `learnhouse.app`, `docs.learnhouse.app`,
+  `university.learnhouse.io`, `classroom.learnhouse.io`, `hello@learnhouse.app`, `discord.gg/learnhouse`,
+  `learnhouse.io/home`: the only hits are the explanatory comments left at the removal sites and the
+  deliberately-retained contact recipient above.
+- `git diff --check` clean; diff reviewed — no pricing/business logic, navigation or unrelated branding string
+  touched.
+
+### Git
+
+- No commit made.
+
+- **Next**: `AuthBrandingPanel.tsx:148` (the last live user-visible LearnHouse URL), then the LearnOrbit
+  logo/favicon asset set. Still open from earlier: the OrgSignInMethods label reword (product decision), the
+  locale showcase / "LearnHouse Explore" strings, and the email sender/recipient addresses (DNS work).
+
+## Branding — AuthBrandingPanel URL removed (2026-08-28)
+
+Closes the gap flagged at the end of the previous entry: the last live user-visible LearnHouse URL.
+
+### Files
+
+- `apps/web/components/Auth/AuthBrandingPanel.tsx:148` — the `/lrn.svg` mark in the auth panel top bar no
+  longer links to `https://learnhouse.app`. The `<Link prefetch … target="_blank">` wrapper was removed and
+  the `<img>` kept in place; `hover:opacity-100` dropped since nothing is clickable now, while the
+  `text_color`-dependent opacity/invert classes and the `{!isEnterprise && !noOrg}` visibility condition are
+  unchanged. The `Link` import stays — it is still used by the org-panel logo link at :183.
+
+### Verification
+
+- ESLint on the file — 0 errors, 0 warnings.
+- `npx tsc --noEmit` in `apps/web` — clean, exit 0.
+- `bun test tests/responsive-guard.test.mjs tests/a11y-guard.test.mjs` — **42 pass, 0 fail**.
+- Scan of the whole web source (`components`, `app`, `services`, `lib`, `ee`) for `http(s)://…learnhouse.*`,
+  `discord.gg/learnhouse` and `mailto:…@learnhouse`: **no live URL remains** — the only two hits are the
+  explanatory comments left at earlier removal sites (`OrgMenu.tsx:331`, `transactional.ts:21`).
+- `git diff --check` clean.
+
+### Still LearnHouse in this file (not URLs, deliberately untouched)
+
+`:5` the `learnhouse_bigicon_1.png` import and `:31` `UNSPLASH_UTM` (`utm_source=LearnHouse`); the brand
+fallbacks at `:78` (`title || 'Welcome back to LearnHouse.'`) and `:206` (`org?.name || 'LearnHouse'`); and
+`alt="LearnHouse"` at `:151` / `:197`. The two fallbacks are the same class of string fixed in the
+page-titles increment and are the obvious next small item; the asset name and alt text belong to the
+logo/asset work.
+
+### Git
+
+- No commit made.
+
+- **Next**: the two brand fallbacks in this file, then the LearnOrbit logo/favicon asset set. Still open: the
+  OrgSignInMethods label reword (product decision), the locale showcase / "LearnHouse Explore" strings, and
+  the email sender/recipient addresses (DNS work).
+
+## Branding — AuthBrandingPanel brand fallbacks (2026-08-28)
+
+Follow-up to the entry above, at the user's request: the two hardcoded brand fallbacks flagged there.
+
+### Files
+
+- `apps/web/components/Auth/AuthBrandingPanel.tsx`
+  - `:78` `noOrgTitle = title || 'Welcome back to LearnHouse.'` → `'Welcome back to LearnOrbit.'`. This is the
+    apex/no-org panel heading; the `title` prop still wins, and login passes
+    `t('auth.image_title_login')`, whose locale value and `defaultValue` were already rebranded — so the
+    three now agree.
+  - `:207` `{org?.name || 'LearnHouse'}` → `'LearnOrbit'`. Org-panel heading; the dynamic `org?.name` path is
+    unchanged, only the fallback literal.
+
+No other line touched: `noOrgSubtitle`, the background/scrim logic, visibility conditions and props are as
+they were.
+
+### Verification
+
+- ESLint on the file — 0 errors, 0 warnings.
+- `npx tsc --noEmit` in `apps/web` — clean, exit 0.
+- `git diff --check` clean.
+
+### Still LearnHouse in this file (unchanged, out of scope)
+
+`:31` `UNSPLASH_UTM` (`utm_source=LearnHouse` — a referral attribution parameter sent to Unsplash, not
+user-visible copy), the `learnhouse_bigicon_1.png` import, `alt="LearnHouse"` at `:153` / `:198`, and the
+comments at `:34` / `:144`. These belong to the logo/asset and comment sweeps.
+
+### Git
+
+- No commit made.
+
+- **Next**: the LearnOrbit logo/favicon asset set. Still open: the OrgSignInMethods label reword (product
+  decision), the locale showcase / "LearnHouse Explore" strings, and the email sender/recipient addresses.
+
+## Branding — LearnOrbit logo & favicon asset set (2026-08-29)
+
+Closes the last open item of the branding sweep. The user supplied an approved LearnOrbit identity reference
+(mark + wordmark + palette + Inter), which unblocked the increment the previous audit had stopped on. The
+artwork was **recreated as clean vector geometry** from that reference — nothing was traced, cropped from the
+reference sheet, or derived from the LearnHouse mark.
+
+### Assets created (6 files, `apps/web/public/`)
+
+All six come from one piece of geometry: an open ring (`M113.09 38.4 A62 62 0 1 0 156.65 85.11`, 22px round
+cap stroke) plus a teal dot and hook accent, in a 192×192 space. Palette `#2563EB` / `#3B82F6` / `#14B8A6` /
+`#0F172A` per the reference.
+
+- **`lrn.svg`** (replaced) — colour mark, blue→teal gradient, for light surfaces. 192×192 viewBox (was 304×152,
+  a 2:1 LearnHouse mark), so square `width`/`height` props now fill instead of letterboxing.
+- **`lrn-dash.svg`** (replaced) — the same geometry in solid white, for dark surfaces.
+- **`lrn-text.svg`** (replaced) — mark + wordmark lockup, 1488×218 (the previous file's exact box, so the
+  watermark badge's `width={95}` renders at an unchanged height).
+- **`learnorbit_app_icon.png`** (new) — 1180×1180 gradient squircle with a white mark, transparent outside the
+  corner radius.
+- **`learnorbit_lockup.png`** (new) — 1732×320 horizontal lockup on transparency.
+- **`favicon.ico`** (replaced) — 16×16 + 32×32, 32bpp BGRA with AND mask, same structure as the file it
+  replaces.
+
+The wordmark is real **Inter SemiBold outlines** (OFL), extracted with fontTools and baked into the SVG as
+`<path>` data at -0.015em tracking — no `<text>` element, so no font dependency at render time. `Learn` is
+`#0F172A`, `Orbit` is `#2563EB`. Every SVG is pure vector: no `<image>`, no base64, no external URL, no
+`xlink:href` (scanned).
+
+Build inputs live outside the repo (scratchpad): a fontTools extractor and a `sharp`-based composer. They are
+not committed — the assets are the deliverable, and re-running them needs only the reference and this entry.
+
+### Application consumers updated (18 files, all web)
+
+- **Repointed to `learnorbit_app_icon.png`**: `Auth/AuthBrandingPanel.tsx` and `Auth/AuthMobileHeader.tsx` (the
+  default org-logo tile), `app/payments/stripe/connect/oauth/page.tsx`, `EmbedActivityClient.tsx:171`.
+- **Repointed to `learnorbit_lockup.png`**: `app/not-found.tsx`. Same aspect ratio as `black_logo.png`, and
+  Tailwind preflight's `img { height: auto }` means the existing `width={270} height={100}` still renders
+  undistorted.
+- **`lrn.svg` → `lrn-dash.svg`, `invert` class dropped** at the four dark-chip sites — `Objects/Editor/Editor.tsx`,
+  `Playground/PlaygroundEditor.tsx`, `Dashboard/Boards/BoardTopBar.tsx`, `Dashboard/Boards/BoardToolbar.tsx`.
+  All four are a 14px mark inside a `bg-black` 25px chip; `invert` on the old black mark produced white, but
+  inverting the new *gradient* would produce orange. Using the white mark directly is the same result with no
+  filter.
+- **`AuthBrandingPanel.tsx:158`** — the one place the filter had to stay conditional (`text_color === 'light'`)
+  became `opacity-60 brightness-0 invert`: flatten first, then invert, which yields white for any source. Same
+  pattern `DashMobileMenu.tsx` already used.
+- **`alt` updated with the artwork** (`LearnHouse` / `Learnhouse logo` / `logo` → `LearnOrbit`) at
+  `home.tsx`, `(hub)/new/page.tsx`, `OrgMenuChrome.tsx`, `EmbedActivityClient.tsx:281`, `AuthBrandingPanel.tsx`,
+  `AuthMobileHeader.tsx`, `DashLeftMenu.tsx`, `DashMobileMenu.tsx` (×2), `WelcomeModal.tsx`,
+  `AdminLeftMenu.tsx`, `Watermark.tsx`, `not-found.tsx`, plus the four sites above.
+  `(hub)/new-channel/page.tsx:202` already said `alt="LearnOrbit"` over LearnHouse artwork — that label is now
+  truthful without an edit.
+- **Left decorative**: `CommandPalette.tsx:254` and `stripe/connect/oauth/page.tsx:76` keep `alt=""` (+
+  `aria-hidden` where present) — §22's decorative pattern, not an alt-text gap.
+- **Untouched**: `OrgEditBranding/AuthBrandingTab.tsx:327` uses `url(/lrn.svg)` as a preview thumbnail and
+  needs no change now that the file itself is LearnOrbit.
+
+### Favicon mechanism (inspected, unchanged)
+
+`apps/web/app/` has no `icon.*`, `apple-icon.*`, `favicon.ico`, `manifest.ts` or `opengraph-image.*`, and
+`app/layout.tsx` exports no `metadata`. The platform default therefore comes solely from `public/favicon.ico`
+being served at the root — replaced in place. The **optional** `icon.png` / `apple-icon.png` deliverables were
+deliberately **not** added: as `app/icon.*` they would emit `<link rel="icon">` tags that compete with the
+per-org `icons` metadata in `lib/seo/orgFaviconMetadata.ts:21`, and not breaking org-specific favicons
+outranks an optional asset. As `public/` files they would be dead weight. Worth revisiting only alongside a
+deliberate decision about the org favicon precedence.
+
+### Email — evaluated, deliberately unchanged
+
+`components/Emails/LearnHouseEmail.tsx` keeps its HTML text wordmark. An `<Img>` needs an absolute public URL;
+there is no controlled LearnOrbit domain yet (nothing is deployed, and `RESEND_FROM_EMAIL` still defaults to a
+`learnhouse.app` sending domain), and base64/CID are both excluded. `apps/api/src/services/email/utils.py:267
+get_org_logo_url()` is unrelated — it serves an org's *own* uploaded logo. Revisit with the production domain.
+
+### LearnHouse artwork removed vs. retained
+
+**Deleted** (last consumer removed in this increment, zero references remain): `learnhouse_bigicon.png`,
+`learnhouse_bigicon_1.png`, `black_logo.png`.
+
+**Retained, deliberately:**
+- **AI sub-brand — `lrnai_icon.png`, `learnhouse_ai_simple.png`, `learnhouse_ai_black_logo.png`,
+  `learnhouse_ai_simple_colored.png`** — 15 live consumers across the editor, AI-course modals, magic blocks
+  and org settings. Explicitly deferred by this increment's brief; needs its own AI-mark decision.
+- **Unreferenced orphans — `learnhouse_logo.png`, `learnhouse_icon.png`, `learnhouse_text_white.png`,
+  `dashLogo.png`, `theclassroom.png`, `UNI_LOGO.png`** — zero consumers anywhere in `apps/`, so not on any
+  user-visible surface, but still reachable by direct URL from `public/`. Left in place under the brief's
+  "don't delete blindly" rule; deleting them is a clean, separate follow-up.
+- **`docs/`** — the inherited LearnHouse documentation site keeps its own favicon set and logos. Not a
+  LearnOrbit app surface.
+- Compatibility identifiers untouched as required: `LearnHouseEmail`/`Props`, `LearnHouseSpinner`,
+  `showlearnhouselogo`, `.learnhouse-player`, `LH_*` cookies, `LEARNHOUSE_*` env vars, migration IDs.
+
+### Found but NOT changed (out of scope — artwork increment)
+
+`components/Auth/AuthMobileHeader.tsx:83` — `{org?.name || 'LearnHouse'}`, a brand-copy fallback the text
+sweep missed (the sibling literal in `AuthBrandingPanel.tsx` was fixed on 2026-08-28). One-word fix, but it is
+text, not artwork. Flagged for the next text pass.
+
+### Verification
+
+- **Assets**: `file(1)` confirms `learnorbit_app_icon.png` 1180×1180 RGBA, `learnorbit_lockup.png` 1732×320
+  RGBA, `favicon.ico` "MS Windows icon resource - 2 icons, 16x16, 32 bits/pixel, 32x32, 32 bits/pixel".
+  `sharp` metadata: both PNGs `hasAlpha=true`, corner pixel `[0,0,0,0]`, min alpha 0 (real transparency, no
+  white canvas). The `.ico` was re-parsed frame by frame from its own bytes — both 16 and 32 present at 32bpp.
+- **SVG purity**: `grep -licE "base64|xlink:href|<image|href=\"http|url\(http"` over the three SVGs — no match.
+- **Browser render**: headless Chrome screenshot of all six assets at their real usage sizes and container
+  styles (44/30/24/14px marks, dark sidebar + `bg-black` chip, `brightness(0)`, 96/40/64/50px app-icon tiles,
+  the 95px watermark badge, the 270px 404 lockup, and the `.ico` as the page's own tab icon). Everything
+  renders correctly; gradients, transparency and both `.ico` frames all decode in Chrome.
+- **Reference scan**: no `learnhouse_bigicon`, `black_logo`, `learnhouseIcon`, `alt="LearnHouse"` or
+  `alt="Learnhouse` remains anywhere in `apps/web`; the only `learnhouse_` hits left are the two AI-sub-brand
+  imports.
+- ESLint on the 18 changed `.tsx` — **0 errors**, 18 warnings, all pre-existing (hook deps, `no-console`,
+  unused args) and none on a touched line.
+- `npx tsc --noEmit` in `apps/web` — clean, exit 0 (run again after the `AuthBrandingPanel` filter fix).
+- `bun test tests/responsive-guard.test.mjs tests/a11y-guard.test.mjs` — **42 pass, 0 fail**. No test
+  references any of these assets.
+- No Python changed → no ruff/pytest for this increment.
+- `git diff --check`: reports trailing whitespace on the three changed lines of `app/not-found.tsx`. That file
+  is **CRLF in HEAD** (verified with `git show HEAD:… | cat -A`) — the CR is what git flags, it is inherited,
+  and converting the file's line endings would be an unrelated change. Every other changed file is clean.
+
+### Limitations
+
+- Live app verification was not run: the assets and their container styles were verified in a real browser,
+  but not inside a running Next.js instance (that needs the full docker stack, and multi-tenant channel
+  routing can't be exercised on localhost anyway — see CLAUDE.md).
+- The mark is a faithful *recreation* of the reference, not a pixel-exact trace; a raster reference sheet
+  can't be traced exactly. If an authoritative vector master exists, it should replace `lrn.svg` and the
+  others regenerate from it.
+- No dark-mode variant of the wordmark lockup exists (`Learn` is navy). Nothing needs one today — the only
+  lockup surfaces are light.
+
+### Git
+
+- No commit made.
+
+- **Next**: the AI sub-brand mark (4 assets, 15 consumers) if the AI feature stays LearnOrbit-branded, or the
+  `AuthMobileHeader.tsx:83` text fallback as a one-line cleanup. Still open: the OrgSignInMethods label reword
+  (product decision), the locale showcase / "LearnHouse Explore" strings, the email sender/recipient addresses
+  (DNS work), and the unreferenced LearnHouse orphan assets.
+
+## Branding — AuthMobileHeader.tsx org-name fallback (2026-08-31)
+
+Closes the one text gap the artwork increment (2026-08-29) had already flagged: that increment swapped this
+file's icon import and its `alt` text to LearnOrbit, but missed the sibling `org?.name` fallback string on
+line 83.
+
+### Files
+
+- `apps/web/components/Auth/AuthMobileHeader.tsx:83` — `{org?.name || 'LearnHouse'}` → `{org?.name ||
+  'LearnOrbit'}`.
+
+### Scope decision
+
+- `UNSPLASH_UTM = '?utm_source=LearnHouse&utm_medium=referral'` (line 22) is unchanged, matching the precedent
+  already set in the sibling `AuthBrandingPanel.tsx` (fixed 2026-08-28): it's an Unsplash API attribution
+  parameter, not user-visible brand text.
+- Repo-wide scan for `|| 'LearnHouse'` (excluding `node_modules`) found one other hit,
+  `CertificatePreview.tsx`, unrelated to this component and out of scope for this increment.
+
+### Verification
+
+- `bun run lint:strict` (full project, run inside WSL where `bun` is actually installed — this shell's Bash
+  tool is Git Bash on Windows and has no `bun`): 32 errors / 720 warnings, all pre-existing in unrelated files
+  (`BlobPart` undef in `services/courses/transfer.ts`, `Bun` undef in a `.test.mjs`, stray console/unused-var
+  warnings elsewhere). Zero errors or warnings on `AuthMobileHeader.tsx`.
+- `npx tsc --noEmit` in `apps/web` (WSL) — clean, exit 0.
+- `git diff --check` on the changed file — clean.
+- No test references this component (`grep -rl AuthMobileHeader`, 2 hits: itself and `AuthLayout.tsx`, which
+  only renders it) — RED/GREEN not applicable, this is a copy fix.
+
+### Limitations
+
+- Live browser verification not run (same standing localhost multi-tenancy limitation as prior branding
+  entries — see CLAUDE.md).
+
+### Git
+
+- No commit made.
+
+- **Next**: the AI sub-brand mark (4 assets, 15 consumers) if the AI feature stays LearnOrbit-branded. Still
+  open: the OrgSignInMethods label reword (product decision), the locale showcase / "LearnHouse Explore"
+  strings, the email sender/recipient addresses (DNS work), and the unreferenced LearnHouse orphan assets.
+
+## Branding — deferred-item sweep: session sharing, dead keys, orphan assets, slug suffix (2026-08-31)
+
+Clears four of the five items the branding sweep had left open. Two of them turned out to rest on **incorrect
+prior assessments**, corrected below. The AI sub-brand is the only item left, and its scope is now measured
+rather than estimated.
+
+### A. OrgSignInMethods session-sharing reword (the deferred product decision)
+
+Implemented the recommendation recorded on 2026-08-28: keep the control visible and enabled, and reword the
+label/hint to name the deployment rather than a domain LearnOrbit does not own. Wording is deployment-neutral,
+so it stays correct on any host and needs no config interpolation.
+
+- `components/Dashboard/Pages/Users/Security/OrgSignInMethods.tsx` — 3 `defaultValue` strings
+  (label ×2, including the `aria-label` on the `Switch`, plus the hint). "…with learnhouse.io" → "…with the
+  main site"; "signing in at learnhouse.io" → "signing in on the main site".
+- `locales/en.json:3541-3542` and `locales/ar.json:3106-3107` — the same two keys. Arabic uses
+  `الموقع الرئيسي` ("the main site") after `مع` and `عبر`; both prepositions take a following noun phrase, so
+  no inflection change was needed (same care as the Turkish vowel-harmony fix on 2026-08-28).
+- Stale comments corrected: `Security/shared.tsx:55` and `Objects/Banners/OrgMFAPolicyGate.tsx:311`.
+- **The `aria-label` occurrence sits at a different indent** from the visible label and survived a first
+  `replace_all` pass — caught by re-grepping the file rather than trusting the edit. Worth remembering: the
+  same string at two indents needs two edits.
+- No logic touched. `allow_central_session_sharing` enforcement is unchanged — the string never appeared in
+  the logic, only in copy.
+
+### B. "LearnHouse Explore" showcase strings — prior assessment corrected, keys deleted
+
+The 2026-08-28 entry deferred `dashboard.organization.settings.showcase_explore` / `showcase_description`
+(9 locales) as "user-visible and will need a product decision". **They are not user-visible.** Verified:
+
+- The keys exist in **9 non-English locales only** (zh, vi, tr, th, ru, pt, pl, nl, ko) — there is **no
+  `en.json` source key**.
+- **No code consumer anywhere.** A repo-wide search for `showcase` across `*.tsx/*.ts/*.py/*.mjs` returns only
+  an unrelated discussion-category id (`services/communities/discussions.ts:14`) and a comment.
+
+They are orphaned translation keys that render nowhere, so the "product decision" was moot. Renaming them to
+"LearnOrbit Explore" would have been the wrong fix — it would name a hosted showcase/community service that
+does not exist. **Deleted** from all 9 files instead.
+
+Done with a validating script (line-based deletion, so the other ~4,480 keys per file are untouched
+byte-for-byte; `newline=''` on read/write preserves original line endings). Per file it asserts the keys exist
+under `dashboard.organization.settings`, that exactly 2 lines matched, that the result still parses, and that
+the flattened key-set delta is exactly those 2 keys and nothing else. All 9 reported OK.
+
+### C. Unreferenced LearnHouse orphan assets — deleted
+
+The six assets the 2026-08-29 entry left in place under its "don't delete blindly" rule. Re-verified before
+deleting: a repo-wide search (not just `apps/`) for all six names returns **only `docs/PROGRESS.md`'s own
+historical notes** — no consumer in code, docs site, docker or scripts. All six were tracked and unmodified in
+the working tree, so `git rm` is recoverable from HEAD.
+
+Deleted: `learnhouse_logo.png`, `learnhouse_icon.png`, `learnhouse_text_white.png`, `dashLogo.png`,
+`theclassroom.png`, `UNI_LOGO.png`.
+
+### D. `(hub)/new/page.tsx` — a missed user-visible domain, now config-driven
+
+`app/(hub)/new/page.tsx:610` rendered a hardcoded **`.learnhouse.io`** as the suffix beside the slug input on
+the org-creation form — the domain the new org is told it will live at. Every prior URL sweep missed it
+because it is a bare text label, not an `href`, and the 2026-08-28 entry's claim that `AuthBrandingPanel.tsx:148`
+was "the last known user-visible LearnHouse URL" was wrong for that reason.
+
+Fixed by reading the configured top domain instead of substituting another hardcoded string:
+`.{getLEARNHOUSE_TOP_DOMAIN_VAL()}` (`services/config/config.ts:96`), added to the file's existing
+`@services/config/config` import. The getter, not the module-load constant, per that file's own note that
+runtime config must use the getters. Falls back through env → `LH_top_domain` cookie → `localhost`, so the
+form now shows the real deployment domain rather than a foreign one.
+
+### Files
+
+- `apps/web/components/Dashboard/Pages/Users/Security/OrgSignInMethods.tsx`, `.../Security/shared.tsx`,
+  `apps/web/components/Objects/Banners/OrgMFAPolicyGate.tsx`
+- `apps/web/locales/en.json`, `ar.json` (session sharing); `zh/vi/tr/th/ru/pt/pl/nl/ko.json` (dead keys removed)
+- `apps/web/app/(hub)/new/page.tsx`
+- Deleted: the six `apps/web/public/` orphans above
+
+### Verification
+
+- `npx tsc --noEmit` in `apps/web` — clean, **exit 0**.
+- `bun run lint:strict` — the only hit among changed files is a **pre-existing** `set-state-in-effect` warning
+  at `OrgMFAPolicyGate.tsx:153` (an untouched line; I edited the comment at 311). The other changed files
+  produce no hits at all. Project-wide totals (32 errors / 720 warnings) are unchanged and all in unrelated
+  inherited files.
+- All **22** locale files parse (`json.load`) after the edits.
+- `bun test tests/rtl-guard.test.mjs --timeout 120000` — **9 pass, 0 fail**, including "ar.json covers every
+  en.json key", which confirms the en/ar session-sharing edits kept key parity.
+- `bun test tests/responsive-guard.test.mjs tests/a11y-guard.test.mjs` — **42 pass, 0 fail**.
+- `git diff --check` — the only report is the **pre-existing** CRLF trailing whitespace in
+  `app/not-found.tsx` (documented 2026-08-29; that file was not touched in this increment).
+- Post-change scan: no `learnhouse` string remains in any file edited here except deliberately retained
+  compatibility naming (`RESERVED_SLUGS` containing `'learnhouse'`, the Unsplash UTM, `LEARNHOUSE_*` env-var
+  names, and the import/export format keys).
+- No Python changed → no ruff/pytest.
+- **Note on scanning:** raw `grep -rn` over `apps/web` surfaces a large number of stale `learnhouse.io` hits
+  under `apps/web/.next/standalone/` — that is **gitignored build output** (`apps/web/.gitignore:12`), not
+  source; it still contains the pre-edit text. Use ripgrep (which respects gitignore) or exclude `.next/`.
+
+### AI sub-brand — scope measured, and it is smaller than recorded
+
+The standing note said "4 assets, 15 consumers". Inspecting the artwork itself (rendered each PNG, and
+composited the white one onto a dark ground) changes the picture:
+
+- **`lrnai_icon.png` — brand-neutral, nothing to do.** 110×110, all-white glyph, 37% coverage; composited on
+  dark it is a **plain four-pointed sparkle** with no LearnHouse letterform. It is the generic AI glyph at
+  **11 of the 19 import sites**. Only its filename says "lrnai", which is a compatibility name of the same
+  class as `LearnHousePlayer`.
+- **The three that are actually branded** all carry the LearnHouse "L" letterform inside a violet gradient
+  squircle: `learnhouse_ai_simple_colored.png` (160², 2 sites), `learnhouse_ai_simple.png` (160², grey
+  variant, 5 sites), `learnhouse_ai_black_logo.png` (332×160 — a mark+wordmark lockup, 2 sites).
+
+So the real job is **3 assets across ~8 sites**, not 4 across 15.
+
+### Limitations
+
+- No live app verification (standing localhost multi-tenancy limitation — see CLAUDE.md). The slug-suffix
+  change in particular renders `.localhost` in local dev by design; its production value depends on
+  `NEXT_PUBLIC_LEARNHOUSE_TOP_DOMAIN` / the `LH_top_domain` cookie.
+
+### Found but NOT changed
+
+- **`learnhouse_university` is a dead key in all 22 locales.** No code consumer (orphaned when the
+  `university.learnhouse.io` onboarding link was removed on 2026-08-28). `en.json:1995` was already rebranded
+  to "LearnOrbit University" by the locale sweep, but the other locales still read "LearnHouse University"
+  (e.g. `ar.json:1560`). Zero branding impact because it renders nowhere. Deleting it across 22 files is
+  dead-key cleanup rather than branding, so it is left for a deliberate decision.
+- **`app/(hub)/new/page.tsx:77`** — `RESERVED_SLUGS = ['learnhouse', ...]` reserves `learnhouse` but **not**
+  `learnorbit`, so the `learnorbit` slug is currently claimable by any user. Left alone as out of branding
+  scope, but it is a real gap worth closing.
+- **`services/emails/loops.ts:41`** — `source: 'learnhouse.io'` is a CRM segmentation value sent to Loops, not
+  UI text; changing it would split existing contact records.
+
+### Git
+
+- No commit made.
+
+- **Next**: the AI sub-brand decision (see the measured scope above) — either build a LearnOrbit AI mark from
+  the approved LearnOrbit geometry/palette, or retire the sub-brand and point those ~8 sites at the existing
+  LearnOrbit mark. Still open and unchanged: the email sender/recipient addresses (DNS work).
+
+## Branding — LearnOrbit AI sub-brand mark (2026-08-31)
+
+Closes the last artwork item of the branding sweep. Decision taken: **build a LearnOrbit AI mark** rather than
+retire the sub-brand. As with the 2026-08-29 identity work, nothing was invented — the mark is composed
+entirely from **already-approved** LearnOrbit geometry, so it needed no new design sign-off.
+
+### The design
+
+One idea carries it: **the mark's teal dot becomes the AI sparkle.**
+
+- **Ring and hook are verbatim** from `public/lrn.svg` — `M113.09 38.4A62 62 0 1 0 156.65 85.11` and
+  `M152 70L152 88Q152 104 130 104`, both 22px round-cap stroke in the same 192 space.
+- The `<circle cx="152" cy="35" r="14">` teal dot is **replaced in place** by a four-pointed sparkle
+  (centre 154,31, outer radius 25, pinch 3.5) drawn with four quadratic segments. It lands in the ring's own
+  gap, exactly where the dot sat, so the silhouette stays recognisably LearnOrbit while reading as "AI".
+- Palette unchanged: `#2563EB` → `#3B82F6` → `#14B8A6` on the same diagonal as the app icon.
+
+### Assets created (3 files, `apps/web/public/`)
+
+- **`learnorbit_ai_icon.png`** (160×160) — gradient squircle (`rx=36`), white mark. Replaces
+  `learnhouse_ai_simple_colored.png`.
+- **`learnorbit_ai_icon_dark.png`** (160×160) — **black squircle at 20% opacity**, white mark. Replaces
+  `learnhouse_ai_simple.png`. The 20% figure is not a guess: an alpha histogram of the file it replaces showed
+  ~19,100 px at alpha 32–63 all pure black, with a separate fully-opaque white glyph — i.e. a translucent dark
+  tile, not a grey one. It reads correctly on the dark AI panel, which pairs it with
+  `outline-neutral-200/20 rounded-lg`.
+- **`learnorbit_ai_lockup.png`** (332×160) — the colour icon plus a **white** wordmark. Replaces
+  `learnhouse_ai_black_logo.png`, whose name is misleading: a pixel split of that file showed a violet icon on
+  the left and a pure-white (255,255,255) wordmark on the right, i.e. it was always a dark-background asset.
+
+The wordmark is **not re-rendered from a font**. Its two `<path>` elements are lifted verbatim out of
+`public/lrn-text.svg` — already-outlined Inter SemiBold from the 2026-08-29 work — and recoloured white. The
+generator asserts it extracted exactly 2 paths and exits non-zero otherwise. So the AI lockup's wordmark is
+byte-identical geometry to the main lockup's, with no font dependency at render time.
+
+`lrnai_icon.png` is **untouched** — measured as a brand-neutral sparkle (see the previous entry), so 11 of the
+19 import sites needed no change at all.
+
+### Consumers updated (21 references across 7 files)
+
+Paths and local import identifiers both, following the `learnhouseIcon` → `learnorbitIcon` precedent:
+`learnhouseAI_icon` → `learnorbitAI_icon`, `learnhouseAI_logo_black` → `learnorbitAI_lockup`.
+
+- `Objects/Editor/AI/AIEditorToolkit.tsx`, `Objects/Editor/AI/AIEditorSidePanel.tsx`, `Objects/Editor/Editor.tsx`
+- `Objects/Activities/AI/AIActivityAsk.tsx`, `Objects/Activities/DynamicCanva/AI/AICanvaToolkit.tsx`
+- `Dashboard/Pages/Org/OrgEditAI/OrgEditAI.tsx` and
+  `app/orgs/[orgslug]/dash/org/settings/[subpage]/page.tsx` — these two use runtime `/public` string paths
+  (`src=`, `customIcon:`), not imports, which is why a type check alone could never have caught a mistake here.
+- The `_colored` substitution was ordered **before** the shorter `learnhouse_ai_simple.png` pattern so the
+  latter could not clip the former.
+
+**Deleted**: `learnhouse_ai_simple.png`, `learnhouse_ai_simple_colored.png`, `learnhouse_ai_black_logo.png`.
+Zero references to any of the three remain anywhere in `apps/`.
+
+### Also in this increment (both approved alongside the AI decision)
+
+- **`app/(hub)/new/page.tsx:77`** — `RESERVED_SLUGS` now reserves **`learnorbit`** as well as `learnhouse`.
+  The org-creation form previously left the `learnorbit` slug claimable by any user.
+- **`learnhouse_university` dead key removed from all 22 locales** (`dashboard.home.learnhouse_university`).
+  Orphaned when the `university.learnhouse.io` onboarding link was removed on 2026-08-28: no code consumer,
+  and `en.json` had already been rebranded to "LearnOrbit University" while the other 21 still read
+  "LearnHouse". Same validating script shape as the showcase deletion — per file it asserts exactly one key
+  path matches, exactly one line is removed, the result still parses, and the key-set delta is that key alone.
+  All 22 reported OK.
+
+### Verification
+
+- `npx tsc --noEmit` in `apps/web` — clean, **exit 0** (this is what proves the 5 renamed import identifiers
+  and their 16 usages line up).
+- `bun run lint:strict` — **752 problems (32 errors, 720 warnings)**, *identical* to the pre-change baseline
+  captured earlier this session. No new error or warning was introduced. Every hit in a file touched here is
+  pre-existing (hook deps, `no-console`, unused imports, `set-state-in-effect`) and on an untouched line.
+- `bun test tests/responsive-guard.test.mjs tests/a11y-guard.test.mjs` — **42 pass, 0 fail**.
+- `bun test tests/rtl-guard.test.mjs --timeout 120000` — **9 pass, 0 fail**, including "ar.json covers every
+  en.json key" after the 22-locale key removal.
+- All 22 locale files parse.
+- **Rendered verification**: each asset was rasterised and composited onto a dark panel at its real render
+  sizes — the icons at **24px** (`AIEditorSidePanel.tsx:1030`) and 64px, the lockup at **80px**
+  (`AIEditorSidePanel.tsx:1489`) and 240px — and inspected. The ring stays legible at 24px, the sparkle reads
+  as an accent, and the lockup wordmark is clean.
+- `git diff --check` — only the **pre-existing** CRLF trailing whitespace in `app/not-found.tsx` (untouched
+  here; documented 2026-08-29).
+- Reference scan: no `learnhouse_ai` / `learnhouseAI_` string remains in `apps/`.
+- No Python changed → no ruff/pytest.
+
+### Limitations
+
+- **The lockup reads "LearnOrbit", not "LearnOrbit AI".** Inter is not installed on this machine
+  (`fc-list | grep -ci inter` → 0) and no Inter font file exists on disk, so "AI" could not be set in the real
+  typeface. Hand-drawing an `A` and `I` to sit beside genuine Inter SemiBold outlines would have been visibly
+  off, so it was refused. The sparkle carries the AI meaning instead, and the surrounding UI already supplies
+  the words (`t('editor.ai_panel.title')` sits directly beneath it). Worth revisiting if an Inter file is ever
+  added — the generator would need two more glyphs and nothing else.
+- No live app verification (standing localhost multi-tenancy limitation — see CLAUDE.md). Assets were verified
+  as rendered images at real sizes, not inside a running Next.js instance.
+- The generator lives outside the repo (`/tmp/build_ai_mark.js`), matching the 2026-08-29 convention: the
+  assets are the deliverable, and re-running it needs only `lrn.svg` + `lrn-text.svg` and this entry.
+
+### Git
+
+- No commit made.
+
+- **Next**: the branding sweep is now complete except **email sender/recipient addresses**, which are blocked
+  on DNS/a controlled domain (`RESEND_FROM_EMAIL` still defaults to a `learnhouse.app` sending domain, and
+  `transactional.ts` still falls back to a `hello@learnhouse.app` recipient). Beyond branding, the only
+  unchecked roadmap item remains **production deployment** (`docs/ROADMAP.md` Phase 9).

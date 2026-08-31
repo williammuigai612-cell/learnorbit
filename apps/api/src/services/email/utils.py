@@ -388,7 +388,7 @@ def send_email(
 
     lh_config = get_learnhouse_config()
     mailing = lh_config.mailing_config
-    sender = f"LearnHouse <{mailing.system_email_address}>"
+    sender = f"LearnOrbit <{mailing.system_email_address}>"
 
     # Resend (and most providers) require a plain `email@example.com` string.
     # Pydantic's EmailStr is a str subclass, but third-party JSON serializers

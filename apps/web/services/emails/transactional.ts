@@ -18,7 +18,9 @@ export async function sendWelcomeAccountMail(args: { email: string; username?: s
       'Invite learners and track their progress.',
       'Brand your school and share it with the world.',
     ],
-    cta: { label: 'Get started', href: 'https://www.learnhouse.io/home' },
+    // No CTA: https://www.learnhouse.io/home is not a LearnOrbit destination.
+    // `cta` is optional and the template omits the button when absent —
+    // restore it once a real destination exists.
   })
 }
 

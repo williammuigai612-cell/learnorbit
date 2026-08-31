@@ -925,13 +925,15 @@ async def api_admin_issue_magic_link(
     return MagicLinkResponse(**result)
 
 
-def _support_url() -> str:
-    """Return a support contact URL for the magic-link error page.
+def _support_url() -> Optional[str]:
+    """Return a support contact URL for the magic-link error page, if any.
 
     The old `{platform}/dashboard/support` path 404s (the platform dashboard is
-    gone on .io), so use a support mailto that can never break.
+    gone on .io) and the `hello@learnhouse.app` mailto that replaced it is not a
+    LearnOrbit address. With no valid destination this returns None and the
+    caller omits the button rather than linking somewhere that does not answer.
     """
-    return "mailto:hello@learnhouse.app"
+    return None
 
 
 def _render_magic_link_error(title: str, message: str) -> HTMLResponse:
@@ -941,12 +943,17 @@ def _render_magic_link_error(title: str, message: str) -> HTMLResponse:
     # title/message come from our own HTTPExceptions, not user input.
     safe_title = title.replace("<", "&lt;").replace(">", "&gt;")
     safe_message = message.replace("<", "&lt;").replace(">", "&gt;")
+    support_block = (
+        f'<a class="support" href="{support}">Something not working as expected?</a>'
+        if support
+        else ""
+    )
     html = f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign-in link — LearnHouse</title>
+<title>Sign-in link — LearnOrbit</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
          background: #f6f7f9; color: #111827; margin: 0;
@@ -966,7 +973,7 @@ def _render_magic_link_error(title: str, message: str) -> HTMLResponse:
   <div class="card">
     <h1>{safe_title}</h1>
     <p>{safe_message}</p>
-    <a class="support" href="{support}">Something not working as expected?</a>
+    {support_block}
     <p class="hint">Our team can re-issue your sign-in link or help you access your account.</p>
   </div>
 </body>
@@ -980,8 +987,8 @@ def _render_magic_link_error(title: str, message: str) -> HTMLResponse:
     description=(
         "Public endpoint — no API token required. Validates the magic-link "
         "JWT from the query string, sets authentication cookies, and redirects "
-        "to the target path. On error, renders a friendly HTML page with a "
-        "support link instead of a raw JSON error."
+        "to the target path. On error, renders a friendly HTML page instead of "
+        "a raw JSON error."
     ),
     responses={
         302: {"description": "Success — cookies set and redirect to target"},

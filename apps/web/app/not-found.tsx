@@ -1,7 +1,7 @@
 import { ArrowRight } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
-import learnhouseIcon from '@public/black_logo.png'
+import learnorbitLockup from '@public/learnorbit_lockup.png'
 
 export default function NotFound() {
   return (
@@ -14,8 +14,8 @@ export default function NotFound() {
         <Image quality={100}
           width={270}
           height={100}
-          src={learnhouseIcon}
-          alt="logo"
+          src={learnorbitLockup}
+          alt="LearnOrbit"
         />
         </div>
       <div className="space-y-6 text-center">

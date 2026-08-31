@@ -20,15 +20,12 @@ import { useTranslation } from 'react-i18next'
 import useAdminStatus from '@components/Hooks/useAdminStatus'
 import {
   Question,
-  Book,
-  Globe,
   ChatCircleDots,
   ChatCircle,
   SquaresFour,
   ChalkboardSimple,
   Signpost,
 } from '@phosphor-icons/react'
-import { DiscordIcon } from '@components/Objects/Icons/DiscordIcon'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -326,39 +323,12 @@ export const OrgMenu = (props: any) => {
                       <span>{t('common.help')}</span>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild>
-                      <a
-                        href="https://docs.learnhouse.app"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2"
-                      >
-                        <Book size={16} weight="fill" />
-                        <span>{t('common.help_menu.documentation')}</span>
-                      </a>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <a
-                        href="https://learnhouse.app"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2"
-                      >
-                        <Globe size={16} weight="fill" />
-                        <span>{t('common.help_menu.website')}</span>
-                      </a>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <a
-                        href="https://discord.gg/learnhouse"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2"
-                      >
-                        <DiscordIcon size={16} />
-                        <span>{t('common.help_menu.discord')}</span>
-                      </a>
-                    </DropdownMenuItem>
+                    {/* Documentation and website links removed: the LearnHouse
+                        destinations no longer apply and LearnOrbit has none yet.
+                        Restore here once real URLs exist (the locale strings
+                        common.help_menu.documentation/.website are kept). */}
+                    {/* Discord item removed with the docs/website items above:
+                        discord.gg/learnhouse is the LearnHouse community. */}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onClick={() => setFeedbackModalOpen(true)}

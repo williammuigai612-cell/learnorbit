@@ -308,7 +308,7 @@ function BlockingInterstitial({
 }
 
 // This org's policy refused the current session (wrong auth method, or a central
-// learnhouse.io session that isn't bound to this org). Send the user to THIS
+// main-site session that isn't bound to this org). Send the user to THIS
 // org's own login page — never a global logout, since they may belong to other
 // orgs that are perfectly happy with their session.
 function OrgAuthMethodBanner({

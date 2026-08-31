@@ -100,7 +100,9 @@ export default function ErrorActions({ resolutions, reset, eventId, loginNext }:
   const loginHref = loginNext
     ? `/login?next=${encodeURIComponent(loginNext)}`
     : '/login'
-  const supportHref = getPlatformUrl('/contact') || 'mailto:support@learnhouse.io'
+  // Null when no platform URL is configured; the support button is then
+  // omitted rather than falling back to a LearnHouse contact address.
+  const supportHref = getPlatformUrl('/contact')
 
   return (
     <div className="flex flex-wrap justify-center gap-3">
@@ -138,6 +140,7 @@ export default function ErrorActions({ resolutions, reset, eventId, loginNext }:
                 label="Report this problem" icon={<MessageSquareWarning size={16} />} />
             )
           case 'contact_support':
+            if (!supportHref) return null
             return (
               <ActionButton key={kind} href={supportHref} variant="ghost" label="Contact support"
                 icon={<LifeBuoy size={16} />} />

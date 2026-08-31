@@ -2,7 +2,7 @@
 import React from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import learnhouseIcon from '@public/learnhouse_bigicon_1.png'
+import learnorbitIcon from '@public/learnorbit_app_icon.png'
 import { getOrgLogoMediaDirectory, getOrgAuthBackgroundMediaDirectory } from '@services/media/media'
 import { getUriWithOrg } from '@services/config/config'
 import { cn } from '@/lib/utils'
@@ -75,7 +75,7 @@ export default function AuthBrandingPanel({ org, welcomeText, title, subtitle }:
 
   const displayMessage = welcome_message || welcomeText || ''
   // No-org platform copy (defaults mirror the platform login illustration).
-  const noOrgTitle = title || 'Welcome back to LearnHouse.'
+  const noOrgTitle = title || 'Welcome back to LearnOrbit.'
   const noOrgSubtitle =
     subtitle || 'Pick up where you left off — your courses, students, and tools are waiting.'
   // Treat the no-org illustration like a photo background: dark scrim, no
@@ -141,22 +141,26 @@ export default function AuthBrandingPanel({ org, welcomeText, title, subtitle }:
 
         {/* Content */}
         <div className="relative z-10 flex flex-col h-full p-10">
-          {/* Top bar with LearnHouse lrn.svg logo - hidden for enterprise users
+          {/* Top bar with the LearnOrbit lrn.svg mark - hidden for enterprise users
               and for the no-org apex panel (platform shows no logo on the image). */}
           {!isEnterprise && !noOrg && (
             <div className="login-topbar">
-              <Link prefetch href="https://learnhouse.app" target="_blank">
-                <img
-                  src="/lrn.svg"
-                  alt="LearnHouse"
-                  width={30}
-                  height={30}
-                  className={cn(
-                    "transition-opacity hover:opacity-100",
-                    text_color === 'light' ? "opacity-60 invert" : "opacity-40"
-                  )}
-                />
-              </Link>
+              {/* Mark only — the learnhouse.app destination was removed and
+                  LearnOrbit has no marketing site yet. Re-wrap in a <Link>
+                  once a real URL exists. */}
+              <img
+                src="/lrn.svg"
+                alt="LearnOrbit"
+                width={30}
+                height={30}
+                className={cn(
+                  "transition-opacity",
+                  // brightness-0 flattens the mark's gradient before inverting,
+                  // so a light-on-dark panel gets a white mark rather than the
+                  // gradient's inverted (orange) hue.
+                  text_color === 'light' ? "opacity-60 brightness-0 invert" : "opacity-40"
+                )}
+              />
             </div>
           )}
 
@@ -193,8 +197,8 @@ export default function AuthBrandingPanel({ org, welcomeText, title, subtitle }:
                           quality={100}
                           width={96}
                           height={96}
-                          src={learnhouseIcon}
-                          alt="LearnHouse"
+                          src={learnorbitIcon}
+                          alt="LearnOrbit"
                           className="object-contain"
                         />
                       )}
@@ -203,7 +207,7 @@ export default function AuthBrandingPanel({ org, welcomeText, title, subtitle }:
 
                   {/* Text content */}
                   <div className="space-y-1">
-                    <h1 className="font-black text-3xl tracking-tight">{org?.name || 'LearnHouse'}</h1>
+                    <h1 className="font-black text-3xl tracking-tight">{org?.name || 'LearnOrbit'}</h1>
                     {displayMessage && (
                       <p className={cn(
                         "text-lg max-w-sm leading-relaxed",

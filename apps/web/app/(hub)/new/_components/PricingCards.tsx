@@ -13,6 +13,7 @@
 // planLimits) and selection is reported via onSelect.
 import React from 'react'
 import { motion } from 'motion/react'
+import { getPlatformUrl } from '@services/config/config'
 import { Check, GraduationCap, Presentation } from '@phosphor-icons/react'
 import {
   GENERAL_PLANS,
@@ -88,6 +89,11 @@ export default function PricingCards({
   const setPlanType = (v: 'general' | 'personal') =>
     onPlanTypeChange ? onPlanTypeChange(v) : _setPlanType(v)
   const setAnnual = (v: boolean) => (onAnnualChange ? onAnnualChange(v) : _setAnnual(v))
+
+  // Enterprise CTA target: the configured platform contact page. Null when no
+  // platform URL is configured, in which case the fallback CTA is not
+  // rendered (callers can still supply their own via renderEnterpriseCta).
+  const enterpriseContactHref = getPlatformUrl('/contact?subject=business')
 
   const currencySymbol = (planId: string) => getCurrencySymbol(planId, priceOverrides)
 
@@ -341,14 +347,16 @@ export default function PricingCards({
                       {renderEnterpriseCta ? (
                         renderEnterpriseCta()
                       ) : (
-                        <a
-                          href="https://learnhouse.app/contact?subject=business"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-block mt-6 px-5 py-2.5 text-[14px] font-bold bg-white text-black rounded-lg hover:bg-white/90 transition-colors"
-                        >
-                          Talk to us
-                        </a>
+                        enterpriseContactHref && (
+                          <a
+                            href={enterpriseContactHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-block mt-6 px-5 py-2.5 text-[14px] font-bold bg-white text-black rounded-lg hover:bg-white/90 transition-colors"
+                          >
+                            Talk to us
+                          </a>
+                        )
                       )}
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-5 lg:pt-1">

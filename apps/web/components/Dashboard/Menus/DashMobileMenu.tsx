@@ -22,12 +22,10 @@ import {
   X,
   Check,
   ChatCircleDots,
-  Book,
   CaretDown,
   MagnifyingGlass,
   Code,
 } from '@phosphor-icons/react'
-import { DiscordIcon } from '@components/Objects/Icons/DiscordIcon'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import React, { useState } from 'react'
@@ -101,7 +99,7 @@ function DashMobileMenu() {
           >
             <img
               src="/lrn-dash.svg"
-              alt="LearnHouse"
+              alt="LearnOrbit"
               className="h-[18px] w-[18px] opacity-60 hover:opacity-90 transition-opacity"
               style={{ filter: 'brightness(0) invert(1)' }}
             />
@@ -197,7 +195,7 @@ function DashMobileMenu() {
                   />
                 ) : (
                   <div className="h-7 w-7 flex items-center justify-center bg-white/[0.06] rounded-lg">
-                    <img src="/lrn-dash.svg" alt="LearnHouse" className="h-4 w-4" style={{ filter: 'brightness(0) invert(1)' }} />
+                    <img src="/lrn-dash.svg" alt="LearnOrbit" className="h-4 w-4" style={{ filter: 'brightness(0) invert(1)' }} />
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
@@ -260,18 +258,9 @@ function DashMobileMenu() {
                   </div>
                 )}
 
-                <a href="https://docs.learnhouse.app" target="_blank" rel="noopener noreferrer"
-                  className="flex items-center w-full rounded-lg px-2.5 py-2 gap-2.5 text-white/40 hover:text-white/80 hover:bg-white/[0.05] transition-all"
-                >
-                  <Book size={15} weight="fill" />
-                  <span className="text-sm font-medium">{t('common.help_menu.documentation')}</span>
-                </a>
-                <a href="https://discord.gg/learnhouse" target="_blank" rel="noopener noreferrer"
-                  className="flex items-center w-full rounded-lg px-2.5 py-2 gap-2.5 text-white/40 hover:text-white/80 hover:bg-white/[0.05] transition-all"
-                >
-                  <DiscordIcon size={15} />
-                  <span className="text-sm font-medium">{t('common.help_menu.discord')}</span>
-                </a>
+                {/* Documentation and Discord items removed: both are
+                    LearnHouse-owned destinations with no LearnOrbit
+                    equivalent. The locale strings are retained. */}
                 <button
                   onClick={() => { setFeedbackModalOpen(true); close() }}
                   className="flex items-center w-full rounded-lg px-2.5 py-2 gap-2.5 text-white/40 hover:text-white/80 hover:bg-white/[0.05] transition-all"

@@ -73,18 +73,26 @@ class TestEmailsService:
         assert result is True
         body = send_email.call_args.kwargs["body"]
         assert "user&lt;script&gt;" in body
-        assert "Get Started" in body
+        # No cta_url could be resolved, so the button is omitted entirely rather
+        # than pointed at an arbitrary destination. With the Academy footer gone
+        # too, this email should contain no links at all.
+        assert "Get Started" not in body
+        assert "<a href" not in body
 
-    def test_orgless_welcome_uses_cta_url_and_learnhouse_branding(self):
+    def test_orgless_welcome_uses_cta_url_and_platform_branding(self):
         with patch("src.services.users.emails.send_email", return_value=True) as send_email:
             send_account_creation_email(
                 _user(), "user@test.com", cta_url="https://platform.test/organizations"
             )
         call = send_email.call_args.kwargs
         assert "https://platform.test/organizations" in call["body"]
-        # Org-less keeps the LearnHouse-branded subject + Academy footer, no org logo.
-        assert "Welcome to LearnHouse" in call["subject"]
-        assert "LearnHouse Academy" in call["body"]
+        # Org-less keeps the platform-branded subject, no org logo.
+        assert "Welcome to LearnOrbit" in call["subject"]
+        # The Academy footer link is gone: it pointed at a LearnHouse property and
+        # has no LearnOrbit equivalent. Guard both the label and the old host, so
+        # neither the dead link nor the LearnHouse URL can come back.
+        assert "Academy" not in call["body"]
+        assert "learnhouse" not in call["body"].lower()
         assert "<img" not in call["body"]
 
     def test_welcome_is_whitelabeled_when_org_supplied(self):
@@ -97,27 +105,33 @@ class TestEmailsService:
                 logo_url="https://api.test/content/orgs/org_uuid/logos/logo.png",
             )
         call = send_email.call_args.kwargs
-        # Subject/body name the org (html-escaped), not LearnHouse.
+        # Subject/body name the org (html-escaped), not the platform.
         assert "Acme &amp; Co" in call["subject"]
-        assert "Welcome to LearnHouse" not in call["subject"]
+        assert "Welcome to LearnOrbit" not in call["subject"]
         assert "Acme &amp; Co" in call["body"]
         # Org logo replaces the mark; Academy link is gone; powered-by remains.
         assert '<img src="https://api.test/content/orgs/org_uuid/logos/logo.png"' in call["body"]
-        assert "LearnHouse Academy" not in call["body"]
-        assert "Powered by LearnHouse" in call["body"]
+        assert "LearnOrbit Academy" not in call["body"]
+        assert "Powered by LearnOrbit" in call["body"]
         assert "https://acme.test/home" in call["body"]
 
-    def test_whitelabel_without_logo_falls_back_to_learnhouse_mark(self):
+    def test_whitelabel_without_logo_falls_back_to_learnorbit_wordmark(self):
         with patch("src.services.users.emails.send_email", return_value=True) as send_email:
             send_account_creation_email(
                 _user(), "user@test.com", org_name="Acme", logo_url=None
             )
         call = send_email.call_args.kwargs
-        # No org logo → LearnHouse wordmark (SVG), but text still white-labeled.
+        # No org logo → LearnOrbit text wordmark, but the copy stays white-labeled.
         assert "<img" not in call["body"]
-        assert "<svg" in call["body"]
+        # The mark is HTML text, never markup: the old LearnHouse lockup was an
+        # inline <svg> that Gmail and Outlook strip, so this asserts both that the
+        # LearnHouse artwork is gone and that we have not reintroduced a form of
+        # logo most recipients cannot see.
+        assert "<svg" not in call["body"]
+        assert ">LearnOrbit</span>" in call["body"]
         assert "Acme" in call["subject"]
-        assert "Powered by LearnHouse" in call["body"]
+        # Sourced from translations.py, so it exercises the copy as well as the mark.
+        assert "Powered by LearnOrbit" in call["body"]
 
     def test_role_changed_email_links_back_to_the_org(self):
         """Telling someone their permissions changed is useless without a way
@@ -162,7 +176,7 @@ class TestEmailsService:
         # Hostile username/org names are escaped, never rendered as markup.
         assert "<script>" not in call["body"]
 
-    def test_org_join_email_falls_back_to_learnhouse_mark_without_logo(self):
+    def test_org_join_email_falls_back_to_learnorbit_wordmark_without_logo(self):
         with patch("src.services.users.emails.send_email", return_value=True) as send_email:
             send_org_join_email(
                 email="user@test.com",
@@ -172,7 +186,9 @@ class TestEmailsService:
             )
         call = send_email.call_args.kwargs
         assert "<img" not in call["body"]
-        assert "<svg" in call["body"]
+        # Text wordmark, not the old inline <svg> LearnHouse lockup.
+        assert "<svg" not in call["body"]
+        assert ">LearnOrbit</span>" in call["body"]
 
     def test_org_join_email_translates(self):
         with patch("src.services.users.emails.send_email", return_value=True) as send_email:

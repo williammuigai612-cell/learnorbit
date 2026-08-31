@@ -52,7 +52,7 @@ export type OrgSecurityPolicy = {
   exempt_external_auth: boolean
   // Which sign-in methods this org accepts. The full set = unrestricted.
   allowed_auth_methods: string[]
-  // When off, a central learnhouse.io session can't carry members into this org.
+  // When off, a central main-site session can't carry members into this org.
   allow_central_session_sharing: boolean
 }
 

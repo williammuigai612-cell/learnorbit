@@ -12,7 +12,7 @@ const ToolbarButtons = dynamic(
 import { motion } from 'motion/react'
 import Image from 'next/image'
 import { DividerVerticalIcon, SlashIcon } from '@radix-ui/react-icons'
-import learnhouseAI_icon from '@public/learnhouse_ai_simple.png'
+import learnorbitAI_icon from '@public/learnorbit_ai_icon_dark.png'
 import {
   AIEditorStateTypes,
   useAIEditor,
@@ -512,7 +512,7 @@ function Editor(props: EditorProps) {
                         <Image
                           className=""
                           width={20}
-                          src={learnhouseAI_icon}
+                          src={learnorbitAI_icon}
                           alt=""
                         />
                       </i>{' '}
@@ -527,7 +527,7 @@ function Editor(props: EditorProps) {
                         <Image
                           className="opacity-50 grayscale"
                           width={20}
-                          src={learnhouseAI_icon}
+                          src={learnorbitAI_icon}
                           alt=""
                         />
                       </i>
@@ -717,11 +717,10 @@ const EditorLearnHouseLogo = () => {
         transition={animation.transition}
       >
         <Image
-          src="/lrn.svg"
-          alt="LearnHouse"
+          src="/lrn-dash.svg"
+          alt="LearnOrbit"
           width={14}
           height={14}
-          className="invert"
         />
       </motion.div>
     </div>

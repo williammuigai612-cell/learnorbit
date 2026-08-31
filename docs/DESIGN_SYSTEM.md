@@ -113,6 +113,28 @@ like a tool a serious student *chooses* to spend time in, not one they're assign
 - **Not a cluttered admin dashboard**: creator/admin surfaces (§10 Creator Experience territory) get the same
   restraint as public-facing pages — grouped, prioritized information, not every metric on screen at once.
 
+### Logo & brand assets — **approved**
+
+The mark is an open orbit ring with a teal dot and accent stroke. Every asset below is generated from that one
+piece of geometry; the wordmark is Inter SemiBold outlines (`Learn` in `#0F172A`, `Orbit` in `#2563EB`).
+
+| File | Use |
+|---|---|
+| `public/lrn.svg` | The mark on **light** surfaces. Blue→teal gradient. |
+| `public/lrn-dash.svg` | The same mark, solid white — for **dark** surfaces. |
+| `public/lrn-text.svg` | Horizontal mark + wordmark lockup (1488×218). |
+| `public/learnorbit_app_icon.png` | Square gradient app-icon tile with a white mark (1180×1180), for logo *tiles* and as the default org-logo fallback. |
+| `public/learnorbit_lockup.png` | Raster lockup on transparent (1732×320), where an SVG isn't practical. |
+| `public/favicon.ico` | 16/32px browser tab icon. Per-organization favicons are separate — see `lib/seo/orgFaviconMetadata.ts`. |
+
+Rules:
+- On a dark surface use `lrn-dash.svg`; don't `invert` the colour mark — inverting the gradient yields orange.
+  Where a filter is unavoidable, `brightness-0 invert` (flatten, then invert) gives a clean white.
+- The gradient lives **only** in the brand mark. It is not a licence to gradient UI surfaces — the
+  "not gradient-heavy" rule above still governs backgrounds, cards and chrome.
+- `alt` text is `LearnOrbit`, or `alt=""` + `aria-hidden` where the mark is decorative beside a visible label
+  (§22).
+
 ---
 
 ## 3. Color System — **Final, Approved**

@@ -168,8 +168,8 @@ function EmbedActivityClient({ activityId, courseuuid, orgslug, bgcolor }: Embed
         <div className="bg-white rounded-2xl nice-shadow p-8 max-w-md w-full text-center">
           <div className="mb-6">
             <Image
-              src="/learnhouse_bigicon.png"
-              alt="LearnHouse"
+              src="/learnorbit_app_icon.png"
+              alt="LearnOrbit"
               width={64}
               height={64}
               className="mx-auto"
@@ -278,7 +278,7 @@ function PoweredByBadge({ activityUrl }: { activityUrl: string }) {
       >
         <Image
           src="/lrn.svg"
-          alt="LearnHouse"
+          alt="LearnOrbit"
           width={20}
           height={20}
         />

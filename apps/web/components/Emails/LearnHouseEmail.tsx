@@ -5,7 +5,6 @@ import {
   Heading,
   Hr,
   Html,
-  Img,
   Preview,
   Section,
   Text,
@@ -46,7 +45,20 @@ export interface LearnHouseEmailProps {
   cta?: { label: string; href: string }
 }
 
-const LOGO_URL = 'https://www.learnhouse.io/learnhouse-dark.svg'
+// Brand mark for the email header.
+//
+// Deliberately HTML text, not an image: the previous logo was a remote SVG on a
+// LearnHouse-controlled domain — stripped by Gmail and Outlook, and an external
+// dependency we don't own. Text renders everywhere and needs no hosted asset.
+// Swap for an <Img> once a real LearnOrbit logo and sending domain exist.
+const WORDMARK_STYLE = {
+  fontSize: 20,
+  fontWeight: 800,
+  letterSpacing: '-0.02em',
+  color: '#171717',
+  margin: '0 0 24px',
+  lineHeight: 1,
+} as const
 
 export function LearnHouseEmail({
   accentColor,
@@ -68,7 +80,7 @@ export function LearnHouseEmail({
           <div style={{ height: 6, backgroundColor: accentColor }} />
 
           <Section style={{ padding: '32px 40px 8px' }}>
-            <Img src={LOGO_URL} alt="LearnHouse" height={28} style={{ marginBottom: 24 }} />
+            <Text style={WORDMARK_STYLE}>LearnOrbit</Text>
             <Heading style={{ fontSize: 24, fontWeight: 800, color: '#171717', margin: '0 0 8px', lineHeight: 1.25 }}>
               {heading}
             </Heading>
@@ -133,7 +145,7 @@ export function LearnHouseEmail({
           <Hr style={{ borderColor: '#eee', margin: '24px 40px 0' }} />
           <Section style={{ padding: '16px 40px 32px' }}>
             <Text style={{ fontSize: 12, color: '#a3a3a3', margin: 0 }}>
-              LearnHouse — the open-source learning platform.
+              LearnOrbit — the open-source learning platform.
             </Text>
           </Section>
         </Container>

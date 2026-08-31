@@ -92,8 +92,8 @@ const OrgEditAI: React.FC = () => {
         {/* Header */}
         <div className="flex items-center gap-3">
           <Image
-            src="/learnhouse_ai_simple_colored.png"
-            alt="LearnHouse AI"
+            src="/learnorbit_ai_icon.png"
+            alt="LearnOrbit AI"
             width={28}
             height={28}
           />

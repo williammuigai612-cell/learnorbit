@@ -1,6 +1,7 @@
 'use client'
 import React from 'react'
 import { Check, GraduationCap, Presentation } from 'lucide-react'
+import { getPlatformUrl } from '@services/config/config'
 import {
   GENERAL_PLANS,
   PERSONAL_PLANS,
@@ -155,6 +156,10 @@ export default function PricingGrid({
     )
   }
 
+  // Enterprise CTA target: the configured platform contact page. Null when
+  // no platform URL is configured, in which case the CTA is not rendered.
+  const enterpriseContactHref = getPlatformUrl('/contact?subject=business')
+
   const annualSavePct = (() => {
     const refPlan = planType === 'personal' ? 'personal' : 'standard'
     const override = priceOverrides?.[refPlan]
@@ -253,14 +258,16 @@ export default function PricingGrid({
                       <p className="mt-3 text-white/40 text-base leading-relaxed font-medium">
                         {ENTERPRISE_PLAN.tagline}
                       </p>
-                      <a
-                        href="https://learnhouse.app/contact?subject=business"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-block mt-6 px-5 py-2.5 text-[14px] font-bold bg-white text-black rounded-lg hover:bg-white/90 transition-colors"
-                      >
-                        Talk to us
-                      </a>
+                      {enterpriseContactHref && (
+                        <a
+                          href={enterpriseContactHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block mt-6 px-5 py-2.5 text-[14px] font-bold bg-white text-black rounded-lg hover:bg-white/90 transition-colors"
+                        >
+                          Talk to us
+                        </a>
+                      )}
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-5 lg:pt-1">
                       {ENTERPRISE_PLAN.features.map((f) => (

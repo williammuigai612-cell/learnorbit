@@ -46,11 +46,11 @@
     "help": "مساعدة",
     "help_menu": {
       "documentation": "الوثائق",
-      "website": "موقع LearnHouse",
+      "website": "موقع LearnOrbit",
       "discord": "Discord",
       "report_feedback": "الإبلاغ عن مشكلة أو ملاحظات",
       "feedback_title": "إرسال ملاحظات",
-      "feedback_description": "ساعدنا في تحسين LearnHouse من خلال مشاركة أفكارك أو الإبلاغ عن الأخطاء أو اقتراح ميزات جديدة.",
+      "feedback_description": "ساعدنا في تحسين LearnOrbit من خلال مشاركة أفكارك أو الإبلاغ عن الأخطاء أو اقتراح ميزات جديدة.",
       "feedback_placeholder": "أخبرنا بما يدور في ذهنك...",
       "feedback_success": "شكراً لملاحظاتك!",
       "send_feedback": "إرسال ملاحظات",
@@ -215,7 +215,7 @@
     "organizations": "المؤسسات",
     "billing": "الفوترة",
     "create_organization": "إنشاء مؤسسة",
-    "copyright": "© {{year}} LearnHouse, Inc.",
+    "copyright": "© {{year}} LearnOrbit",
     "delete_organization_error": "تعذّر حذف هذه المؤسسة. يرجى المحاولة مرة أخرى.",
     "org_actions": "إجراءات المؤسسة",
     "manage_upgrade": "إدارة / ترقية",
@@ -366,11 +366,11 @@
     "privacy_policy": "سياسة الخصوصية",
     "image_title_forgot": "أعد تعيين كلمة مرورك.",
     "image_subtitle_forgot": "سنساعدك على العودة إلى حسابك في لمح البصر.",
-    "image_title_login": "مرحبًا بعودتك إلى LearnHouse.",
+    "image_title_login": "مرحبًا بعودتك إلى LearnOrbit.",
     "image_subtitle_login": "تابِع من حيث توقفت — دوراتك وطلابك وأدواتك في انتظارك.",
     "image_title_reset": "أوشكت على الانتهاء.",
     "image_subtitle_reset": "أنشئ كلمة مرور قوية للحفاظ على أمان حسابك.",
-    "image_title_signup": "ابدأ التدريس مع LearnHouse.",
+    "image_title_signup": "ابدأ التدريس مع LearnOrbit.",
     "image_subtitle_signup": "أنشئ حسابك وأطلق دورتك الأولى في دقائق.",
     "image_title_verify": "تحقّق من بريدك الإلكتروني.",
     "image_subtitle_verify": "خطوة سريعة واحدة لتأمين حسابك والبدء.",
@@ -1438,7 +1438,7 @@
           "rate_limited": "محاولات كثيرة جدًا. يرجى الانتظار قليلًا ثم المحاولة مرة أخرى.",
           "status_error": "تعذّر تحميل إعدادات التحقق بخطوتين.",
           "copy_failed": "تعذّر النسخ. يرجى تحديد النص ونسخه يدويًا.",
-          "codes_file_header": "رموز النسخ الاحتياطي للتحقق بخطوتين في LearnHouse. يمكن استخدام كل رمز مرة واحدة.",
+          "codes_file_header": "رموز النسخ الاحتياطي للتحقق بخطوتين في LearnOrbit. يمكن استخدام كل رمز مرة واحدة.",
           "already_enabled": "التحقق بخطوتين مفعّل بالفعل على هذا الحساب.",
           "setup_failed": "تعذّر بدء إعداد التحقق بخطوتين. يرجى المحاولة مرة أخرى.",
           "enabled_toast": "تم تفعيل التحقق بخطوتين.",
@@ -1557,7 +1557,6 @@
           "description": "تكوين إعداداتك الشخصية وكلمات المرور والبريد الإلكتروني"
         }
       },
-      "learnhouse_university": "جامعة ليرن هاوس",
       "welcome_back": "مرحباً بعودتك",
       "plan": "الخطة",
       "create_course": "إنشاء دورة",
@@ -2472,9 +2471,9 @@
         "footer_text_desc": "نص مخصص يظهر في أسفل صفحات منظمتك",
         "default_language": "اللغة الافتراضية",
         "default_language_desc": "اللغة التي يراها الزوار الجدد افتراضيًا واللغة المستخدمة للرسائل المُرسَلة باسم هذه المؤسسة. لا يزال بإمكان الأعضاء تغيير لغة واجهتهم.",
-        "watermark_desc": "إظهار علامة LearnHouse المائية على صفحات منظمتك",
+        "watermark_desc": "إظهار علامة LearnOrbit المائية على صفحات منظمتك",
         "watermark_free_plan": "يتم عرض العلامة المائية دائمًا في الخطة المجانية",
-        "watermark_label": "علامة \"صنع بواسطة LearnHouse\" المائية",
+        "watermark_label": "علامة \"صنع بواسطة LearnOrbit\" المائية",
         "watermark_ee": "مخفي بترخيص الإصدار المؤسسي"
       },
       "images": {
@@ -3103,8 +3102,8 @@
         "methods_description": "اختر الطرق المسموح بها لأعضاء هذه المؤسسة لتسجيل الدخول. اترك جميع الطرق محددة لإبقاء تسجيل الدخول دون قيود.",
         "methods_empty_warning": "من دون تحديد أي طريقة، لن يتمكن أحد من تسجيل الدخول إلى هذه المؤسسة. اختر طريقة واحدة على الأقل.",
         "methods_effect": "تختفي الطرق غير المحددة من صفحة تسجيل الدخول لهذه المؤسسة، ويُطلب من الأعضاء الذين سجّلوا الدخول بإحداها تسجيل الدخول مجددًا بطريقة مسموح بها.",
-        "session_sharing_label": "السماح بمشاركة الجلسات مع learnhouse.io",
-        "session_sharing_hint": "عند الإيقاف، لن يُدخل تسجيل الدخول عبر learnhouse.io الأعضاء إلى هذه المؤسسة — عليهم تسجيل الدخول مجددًا من صفحة تسجيل الدخول الخاصة بها بطريقة مسموح بها.",
+        "session_sharing_label": "السماح بمشاركة الجلسات مع الموقع الرئيسي",
+        "session_sharing_hint": "عند الإيقاف، لن يُدخل تسجيل الدخول عبر الموقع الرئيسي الأعضاء إلى هذه المؤسسة — عليهم تسجيل الدخول مجددًا من صفحة تسجيل الدخول الخاصة بها بطريقة مسموح بها.",
         "saving_short": "جارٍ الحفظ…",
         "save": "حفظ التغييرات",
         "cancel": "إلغاء",
@@ -4761,7 +4760,7 @@
   "embed": {
     "not_supported_description": "هذا النوع من النشاط يتطلب المصادقة ولا يمكن تضمينه.",
     "not_supported_title": "هذا النشاط غير مدعوم",
-    "powered_by": "مدعوم من LearnHouse",
+    "powered_by": "مدعوم من LearnOrbit",
     "visit_activity": "زيارة صفحة النشاط"
   },
   "analytics": {
@@ -5465,10 +5464,10 @@
       },
       "teach_the_world": {
         "title": "تعلّم وانمُ",
-        "description": "موارد لمساعدتك في الاستفادة القصوى من LearnHouse.",
+        "description": "موارد لمساعدتك في الاستفادة القصوى من LearnOrbit.",
         "classroom": "الفصل الدراسي",
         "classroom_desc": "تعلم كيفية تنمية وإدارة دوراتك",
-        "university": "جامعة LearnHouse",
+        "university": "جامعة LearnOrbit",
         "university_desc": "أدلة ونصائح وأفضل الممارسات"
       },
       "add_content": {
@@ -5498,7 +5497,7 @@
       }
     },
     "welcome": {
-      "title": "مرحبًا بك في LearnHouse",
+      "title": "مرحبًا بك في LearnOrbit",
       "subtitle": "أنشئ دورات، وادعُ المتعلمين، وشارك المعرفة مع العالم.",
       "get_started": "ابدأ الآن",
       "features_title": "كل ما تحتاجه",
@@ -6078,7 +6077,7 @@
         "title": "تريد التجربة؟",
         "body": "توجّه إلى",
         "link": "صفحة المطوّرين",
-        "suffix": "لتجربة LearnHouse بدلًا من ذلك."
+        "suffix": "لتجربة LearnOrbit بدلًا من ذلك."
       },
       "validation": {
         "required": "مطلوب",

@@ -47,7 +47,7 @@ import UserAvatar from '@components/Objects/UserAvatar'
 import { createNewOrganization } from '@services/organizations/orgs'
 import { useLHAnalytics } from '@services/analytics/useLHAnalytics'
 import { AnalyticsEvent } from '@services/analytics/events'
-import { getAPIUrl, getUriWithOrg } from '@services/config/config'
+import { getAPIUrl, getUriWithOrg, getLEARNHOUSE_TOP_DOMAIN_VAL } from '@services/config/config'
 import { apiFetch } from '@services/utils/ts/requests'
 import {
   DropdownMenu,
@@ -74,7 +74,7 @@ import PlanSummaryCard from './_components/PlanSummaryCard'
 type UseType = 'personal' | 'organization' | null
 type Step = 'use-type' | 'usage' | 'choose-plan' | 'create-org' | 'success'
 
-const RESERVED_SLUGS = ['learnhouse', 'graphicmade', 'sweave', 'cname']
+const RESERVED_SLUGS = ['learnorbit', 'learnhouse', 'graphicmade', 'sweave', 'cname']
 const RESTRICTED_WORDS = ['sex', 'test']
 
 const STEP_NUMBER: Record<Step, number> = {
@@ -607,7 +607,7 @@ function CreateOrgForm({
                 />
               </Form.Control>
               <span className="px-4 py-3 bg-gray-50 text-black/25 border-s border-gray-100 shrink-0 text-[13px] font-medium select-none">
-                .learnhouse.io
+                .{getLEARNHOUSE_TOP_DOMAIN_VAL()}
               </span>
             </div>
             {formik.errors.slug === 'test_hint' && <TestHint t={t} />}
@@ -976,7 +976,7 @@ export default function CreateNewOrgPage() {
             <div className="flex justify-center">
               <Link href="/home">
                 { }
-                <img src="/lrn.svg" alt="LearnHouse" width={40} height={40} className="opacity-90" />
+                <img src="/lrn.svg" alt="LearnOrbit" width={40} height={40} className="opacity-90" />
               </Link>
             </div>
             <div className="flex justify-end">

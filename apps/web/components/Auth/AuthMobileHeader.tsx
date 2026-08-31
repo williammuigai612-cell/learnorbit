@@ -2,7 +2,7 @@
 import React from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import learnhouseIcon from '@public/learnhouse_bigicon_1.png'
+import learnorbitIcon from '@public/learnorbit_app_icon.png'
 import { getOrgLogoMediaDirectory, getOrgAuthBackgroundMediaDirectory } from '@services/media/media'
 import { getUriWithOrg } from '@services/config/config'
 
@@ -71,8 +71,8 @@ export default function AuthMobileHeader({ org }: AuthMobileHeaderProps) {
               quality={100}
               width={40}
               height={40}
-              src={learnhouseIcon}
-              alt="LearnHouse"
+              src={learnorbitIcon}
+              alt="LearnOrbit"
               className="object-contain"
             />
           )}
@@ -80,7 +80,7 @@ export default function AuthMobileHeader({ org }: AuthMobileHeaderProps) {
       </Link>
 
       <span className="relative z-10 font-semibold text-white text-lg truncate">
-        {org?.name || 'LearnHouse'}
+        {org?.name || 'LearnOrbit'}
       </span>
 
       {/* Unsplash attribution (required by Unsplash API guidelines) */}
