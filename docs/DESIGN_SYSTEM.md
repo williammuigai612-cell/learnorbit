@@ -135,6 +135,26 @@ Rules:
 - `alt` text is `LearnOrbit`, or `alt=""` + `aria-hidden` where the mark is decorative beside a visible label
   (§22).
 
+#### AI sub-brand
+
+AI surfaces use the same mark with **the teal dot promoted into a four-pointed sparkle**. It is the brand mark
+with one element swapped — same ring, same hook, same palette — not a second identity.
+
+| File | Use |
+|---|---|
+| `public/learnorbit_ai_icon.png` | Gradient squircle + white mark (160×160). The **colour** AI icon, for light surfaces. |
+| `public/learnorbit_ai_icon_dark.png` | Black squircle at 20% opacity + white mark (160×160). For **dark** AI panels, which pair it with a faint inset outline. |
+| `public/learnorbit_ai_lockup.png` | AI icon + white wordmark (332×160). Dark backgrounds only — the wordmark is white. |
+| `public/lrnai_icon.png` | The bare white sparkle glyph (110×110), no mark. The inline "AI" affordance in the editor toolbar, slash commands, magic blocks and AI course creation. Brand-neutral — leave it as is. |
+
+Rules:
+- The dark icon is a *translucent* tile, so it only reads correctly on a dark surface. Anywhere else, use the
+  colour icon.
+- The lockup's wordmark reads `LearnOrbit`, not "LearnOrbit AI" — the surrounding UI supplies the "AI" label
+  (see `AIEditorSidePanel`, where the panel title sits directly beneath it).
+- Don't put the AI icon and the plain mark in the same cluster; the sparkle is the only thing telling them
+  apart, and at 24px that difference disappears.
+
 ---
 
 ## 3. Color System — **Final, Approved**
