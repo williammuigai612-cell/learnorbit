@@ -7105,3 +7105,108 @@ Zero references to any of the three remain anywhere in `apps/`.
   on DNS/a controlled domain (`RESEND_FROM_EMAIL` still defaults to a `learnhouse.app` sending domain, and
   `transactional.ts` still falls back to a `hello@learnhouse.app` recipient). Beyond branding, the only
   unchecked roadmap item remains **production deployment** (`docs/ROADMAP.md` Phase 9).
+
+## Branding — pre-commit audit, two fixes, and the commit (2026-08-31)
+
+The branding work had accumulated across ~20 increments without a commit. This entry covers the audit of that
+whole working tree, the two defects it caught, and the commit itself.
+
+### Scope audited
+
+123 files: **106 modified, 5 added, 12 deleted** (2,213 insertions / 927 deletions).
+
+### What the audit checked, and how
+
+- **Protected identifiers.** Rather than eyeballing a 4,276-line diff, extracted every *changed* line
+  (`git diff HEAD -U0`) and grepped that set for `LEARNHOUSE_*`, `_MFA_KEY_INFO`, `showlearnhouselogo`,
+  `LH_mode`/`LH_tenancy`, `get_learnhouse_config`, `.learnhouse-player`, `learnhouse-production`,
+  `LearnHousePlayer`/`LearnHouseSpinner`/`LearnHouseEmail`, the import/export format keys, and
+  `revision =`/`down_revision`. Every hit was either `docs/PROGRESS.md` prose or a *use* of an existing
+  getter — **no protected identifier was renamed or redefined**, and no Alembic migration was touched.
+- **Security-sensitive diffs read individually**: `mfa.py` (issuer label only — key material and
+  `LEARNHOUSE_MFA_ENCRYPTION_KEY` untouched), `magic_login.py` (subject/title/footer strings),
+  `email/utils.py` (sender *display name*; the address still comes from `mailing.system_email_address`),
+  `admin.py` (`_support_url()` → `Optional[str]`/`None`, button omitted; HTML escaping unchanged, and
+  `Optional` confirmed imported at line 8 so the runtime-evaluated annotation cannot raise `NameError`),
+  `ErrorActions.tsx` (dead `mailto:support@learnhouse.io` fallback removed behind an
+  `if (!supportHref) return null` guard).
+- **Unrelated-change sweep.** Filtered the changed code lines down to those containing *no* branding token —
+  the residue was entirely structural JSX from removing external LearnHouse links (`<a>`, `target="_blank"`,
+  `rel="noopener noreferrer"`, `DiscordIcon`, `HoverMenuItem`), three `getPlatformUrl` imports replacing
+  hardcoded URLs, and one deliberate test-assertion flip (`assert "<svg" in` → `not in`) from the email-logo
+  removal. Nothing unrelated to branding was hiding in the tree.
+- **`home.tsx`** — traced the one removed `getLEARNHOUSE_PLATFORM_URL_VAL()` call: the "Powered by LearnHouse"
+  footer was removed wholesale (both branches), orphaning the import; `CopyrightFooter` spacing moved
+  `mt-4` → `mt-10` to hold the layout. The getter itself is still exported and still used elsewhere.
+- **Locale integrity, by script** rather than by eye: flattened all 22 files and compared against
+  `git show HEAD:` — **zero key additions**, removals exactly the three intended dead keys, and every changed
+  value verified to contain a branding token on one side or the other.
+- **Asset resolution**: every `@public/…` import and every runtime `"/….png|svg|ico"` string in `app/` and
+  `components/` was resolved against the filesystem — all present, no dangling reference to any of the 12
+  deleted files.
+- **Stray files / secrets**: untracked set was exactly the five intended PNGs (generators live in `/tmp`,
+  outside the repo); no `.env`/`.pem`/`.key` staged; a secret-pattern scan over the staged diff returned only
+  PROGRESS.md prose naming env vars.
+- **`not-found.tsx`** — `git diff --check` flags it, but `git show HEAD:… | cat -A` confirms the file is
+  **CRLF in HEAD**; the CR is what git reports and the line endings are unchanged. Not a new defect.
+
+### Two defects found — both fixed
+
+1. **`OrgEditAI.tsx:96` — `alt="LearnHouse AI"` on `<Image src="/learnorbit_ai_icon.png">`.** Introduced by
+   the AI sub-brand increment itself: the `src` on line 95 was repointed and the adjacent `alt` was missed.
+   This is the second time in this sweep that a *second* occurrence on a neighbouring line survived a pass
+   (the `aria-label` at a different indent in `OrgSignInMethods.tsx` was the first) — when a branding string
+   appears twice in one component, check the sibling line before declaring the file done.
+2. **`bn.json` → `common.plans.feature_restricted.api_access.description`** — Bengali-only upgrade copy
+   reading "…only for organizations on **LearnHouse**'s Pro plan or above", i.e. the vendor named in
+   user-facing billing text. Now `LearnOrbit-এর`. The genitive suffix `-এর` is correct for both names (it
+   follows a consonant-final stem in either case), so the token swap needed no inflection change — same
+   standard applied to the Turkish vowel-harmony fix on 2026-08-28. Applied with a validating script that
+   asserted exactly one value changed and the key set stayed identical.
+
+Post-fix rescan for user-visible branding — `alt`/`title`/`aria-label`/`placeholder` attributes across
+`app/` and `components/`, and all locale *values* — returns **nothing**.
+
+### Remaining LearnHouse occurrences, classified (all intentional)
+
+- **Compatibility/API identifiers** — `LearnHousePlayer`, `LearnHouseSpinner`, `LearnHouseEmail`,
+  `LearnHouseCourseImport.tsx`, `showlearnhouselogo`, `.learnhouse-player`, `LH_*` cookies, migration IDs.
+- **Env var/config identifiers** — `LEARNHOUSE_*` throughout `apps/api/config/config.py`,
+  `apps/web/services/config/config.ts`, the CLI templates, and the `apps/cli` package itself (the binary is
+  `learnhouse`). Includes `analytics.not_configured.description` in all 22 locales, which is user-visible but
+  names `LEARNHOUSE_TINYBIRD_INGEST_TOKEN`/`_READ_TOKEN` — rebranding the text would make the instructions
+  wrong.
+- **Security-sensitive** — `_MFA_KEY_INFO` (HKDF `info`; changing it would re-derive the key and lock out
+  every enrolled TOTP secret), URL allowlisting in `custom_domains.py` / `email/utils.py`.
+- **Factual import/export references** — `courses.import.learnhouse_*` (4 keys) and
+  `dashboard.courses.import_learnhouse*` (2), across 22 locales: they name the LearnHouse export format the
+  importer actually consumes.
+- **EE licensing** — `EELicenseError.tsx`, `EERequiredScreen.tsx` correctly say "LearnHouse Enterprise
+  Edition"; that is whose licence it is.
+- **Stale comments/docstrings** — `hostUtils.ts`, `redirects.ts`, `proxy.ts`, `config.ts` doc examples. Left
+  for a later cleanup; no user impact.
+- **Blocked on DNS** — `RESEND_FROM_EMAIL` default and the `transactional.ts` recipient fallback.
+
+### Verification (final, post-fix)
+
+- `npx tsc --noEmit` — clean, **exit 0**.
+- `bun run lint:strict` — **752 problems (32 errors, 720 warnings)**, byte-identical to the baseline captured
+  before any of this session's work. Zero new problems.
+- `bun test tests/rtl-guard.test.mjs --timeout 120000` — **9 pass, 0 fail**.
+- `bun test tests/responsive-guard.test.mjs tests/a11y-guard.test.mjs` — **42 pass, 0 fail**.
+- All 22 locales parse; `git diff --cached --check` clean apart from the inherited `not-found.tsx` CRLF.
+
+### Git — the branding work is now committed and pushed
+
+- **`7a9a5470`** — `rebrand: complete LearnOrbit visual and user-facing branding` (123 files).
+- **`e2966ddc`** — `docs: document the AI sub-brand assets in the design system` (adds the four AI assets and
+  their usage rules to `docs/DESIGN_SYSTEM.md`).
+- Both pushed to `origin/learnorbit-v1`; working tree clean, 0 ahead / 0 behind.
+
+**Supersedes the "No commit made." line in every branding entry above** (18 of them, from the legal-footer
+increment on 2026-08-27 through the AI sub-brand on 2026-08-31). They were accurate when written; all of that
+work is in `7a9a5470`. Those lines were left in place rather than rewritten 18 times — this note is the
+authoritative record.
+
+- **Next**: unchanged — **email sender/recipient addresses** (DNS/controlled domain) is the last branding
+  item, and **production deployment** is the last unchecked roadmap box (`docs/ROADMAP.md` Phase 9).
