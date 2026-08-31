@@ -52,6 +52,15 @@ if (!process.env.HOSTNAME) {
   process.env.HOSTNAME = '0.0.0.0';
 }
 
+// Next.js binds process.env.PORT. In the all-in-one image PORT is the
+// container's public port (nginx), so WEB_PORT names the internal port Next.js
+// should take instead — without it, a platform that injects PORT would move
+// Next.js onto the public port and collide with nginx. WEB_PORT is unset in the
+// standalone web image (apps/web/Dockerfile), which keeps using PORT directly.
+if (process.env.WEB_PORT) {
+  process.env.PORT = process.env.WEB_PORT;
+}
+
 // Set PORT from environment or default
 if (!process.env.PORT) {
   process.env.PORT = '3000';

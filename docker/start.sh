@@ -23,6 +23,15 @@ pm2 start node --cwd /app/collab --name learnhouse-collab -- dist/index.js
 # Check if the services are running and log the status
 pm2 status
 
+# Render the nginx config, binding the public port the platform gave us.
+# envsubst is restricted to ${PORT} so nginx's own $host / $scheme /
+# $http_upgrade / $forwarded_proto variables survive untouched.
+mkdir -p /etc/nginx/conf.d
+PORT="${PORT:-80}" envsubst '${PORT}' \
+    < /etc/nginx/templates/default.conf.template \
+    > /etc/nginx/conf.d/default.conf
+echo "nginx listening on port ${PORT:-80}"
+
 # Start Nginx in the background
 nginx -g 'daemon off;' &
 

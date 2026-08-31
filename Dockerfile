@@ -69,9 +69,13 @@ RUN bun run build
 # ───────────────────────────────────────────────
 FROM python:3.14.6-slim-bookworm AS runner
 
-# Single apt layer: nginx, curl, netcat, node, pm2
+# Single apt layer: nginx, curl, netcat, ffmpeg, envsubst, node, pm2
+# ffmpeg: video faststart remuxing on upload (services/utils/upload_content.py)
+#   and the HLS transcode consumer (services/utils/hls_transcode.py). Both
+#   degrade to no-ops without it, so long videos never become seekable.
+# gettext-base: provides envsubst, used by docker/start.sh to bind nginx to $PORT.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends nginx curl netcat-openbsd ca-certificates gnupg unzip build-essential \
+    && apt-get install -y --no-install-recommends nginx curl netcat-openbsd ca-certificates gnupg unzip build-essential ffmpeg gettext-base \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install -g pm2 \
@@ -106,7 +110,11 @@ RUN bun install --production
 
 # Copy configs and scripts
 WORKDIR /app
-COPY ./docker/nginx.conf /etc/nginx/conf.d/default.conf
+# Staged as a template, not as an active config: it carries an unexpanded
+# ${PORT}, which start.sh renders into /etc/nginx/conf.d/default.conf before
+# nginx is launched. Copying it straight to conf.d would leave an invalid
+# config on disk for any path that starts nginx without start.sh.
+COPY ./docker/nginx.conf /etc/nginx/templates/default.conf.template
 COPY ./apps/api/docker-entrypoint.sh /app/api/docker-entrypoint.sh
 COPY ./docker/start.sh /app/start.sh
 RUN chmod +x /app/api/docker-entrypoint.sh /app/start.sh
@@ -115,7 +123,12 @@ RUN chmod +x /app/api/docker-entrypoint.sh /app/start.sh
 # from writing .pyc files back into it. It also keeps __pycache__ out of the
 # enterprise tree, where stale bytecode could otherwise shadow a source file
 # that verifies clean against the signed manifest.
-ENV PORT=8000 LEARNHOUSE_PORT=9000 COLLAB_PORT=4000 HOSTNAME=0.0.0.0 LEARNHOUSE_OSS=true NEXT_PUBLIC_LEARNHOUSE_OSS=true PYTHONDONTWRITEBYTECODE=1
+# PORT is the container's PUBLIC port — the one nginx binds and a PaaS routes
+# to. Each internal service keeps its own variable: WEB_PORT (Next.js),
+# LEARNHOUSE_PORT (FastAPI), COLLAB_PORT (Collab). Previously PORT doubled as
+# Next.js's port, so a platform injecting PORT moved Next.js onto the public
+# port and collided with nginx.
+ENV PORT=80 WEB_PORT=8000 LEARNHOUSE_PORT=9000 COLLAB_PORT=4000 HOSTNAME=0.0.0.0 LEARNHOUSE_OSS=true NEXT_PUBLIC_LEARNHOUSE_OSS=true PYTHONDONTWRITEBYTECODE=1
 
 EXPOSE 80 9000 4000
 
